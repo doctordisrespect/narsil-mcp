@@ -1,0 +1,156 @@
+//! Git integration tool handlers
+
+use anyhow::Result;
+use serde_json::Value;
+
+use super::{ArgExtractor, ToolHandler};
+use crate::index::CodeIntelEngine;
+
+/// Handler for get_blame tool
+pub struct GetBlameHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetBlameHandler {
+    fn name(&self) -> &'static str {
+        "get_blame"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let path = args.get_str("path").unwrap_or("");
+        let start_line = args.get_u64("start_line").map(|v| v as usize);
+        let end_line = args.get_u64("end_line").map(|v| v as usize);
+        engine.get_blame(repo, path, start_line, end_line).await
+    }
+}
+
+/// Handler for get_file_history tool
+pub struct GetFileHistoryHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetFileHistoryHandler {
+    fn name(&self) -> &'static str {
+        "get_file_history"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let path = args.get_str("path").unwrap_or("");
+        let max_commits = args.get_u64_or("max_commits", 20) as usize;
+        engine.get_file_history(repo, path, max_commits).await
+    }
+}
+
+/// Handler for get_recent_changes tool
+pub struct GetRecentChangesHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetRecentChangesHandler {
+    fn name(&self) -> &'static str {
+        "get_recent_changes"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let days = args.get_u64_or("days", 7) as u32;
+        engine.get_recent_changes(repo, days).await
+    }
+}
+
+/// Handler for get_hotspots tool
+pub struct GetHotspotsHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetHotspotsHandler {
+    fn name(&self) -> &'static str {
+        "get_hotspots"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let days = args.get_u64_or("days", 30) as u32;
+        let min_complexity = args.get_u64("min_complexity").map(|v| v as usize);
+        engine.get_hotspots(repo, days, min_complexity).await
+    }
+}
+
+/// Handler for get_contributors tool
+pub struct GetContributorsHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetContributorsHandler {
+    fn name(&self) -> &'static str {
+        "get_contributors"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let path = args.get_str("path");
+        engine.get_contributors(repo, path).await
+    }
+}
+
+/// Handler for get_commit_diff tool
+pub struct GetCommitDiffHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetCommitDiffHandler {
+    fn name(&self) -> &'static str {
+        "get_commit_diff"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let commit = args.get_str("commit").unwrap_or("");
+        let path = args.get_str("path");
+        engine.get_commit_diff(repo, commit, path).await
+    }
+}
+
+/// Handler for get_symbol_history tool
+pub struct GetSymbolHistoryHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetSymbolHistoryHandler {
+    fn name(&self) -> &'static str {
+        "get_symbol_history"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let path = args.get_str("path").unwrap_or("");
+        let symbol = args.get_str("symbol").unwrap_or("");
+        let max_commits = args.get_u64_or("max_commits", 10) as usize;
+        engine.get_symbol_history(repo, path, symbol, max_commits).await
+    }
+}
+
+/// Handler for get_branch_info tool
+pub struct GetBranchInfoHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetBranchInfoHandler {
+    fn name(&self) -> &'static str {
+        "get_branch_info"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        engine.get_branch_info(repo).await
+    }
+}
+
+/// Handler for get_modified_files tool
+pub struct GetModifiedFilesHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetModifiedFilesHandler {
+    fn name(&self) -> &'static str {
+        "get_modified_files"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        engine.get_modified_files(repo).await
+    }
+}

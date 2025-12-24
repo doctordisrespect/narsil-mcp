@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "narsil-mcp": {
+      "command": "narsil-mcp",
+      "args": [
+        "--repos", "${workspaceFolder}",
+        "--git",
+        "--call-graph"
+      ],
+      "env": {
+        "RUST_LOG": "warn"
+      }
+    }
+  }
+}

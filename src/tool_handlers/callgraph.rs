@@ -1,0 +1,109 @@
+//! Call graph analysis tool handlers
+
+use anyhow::Result;
+use serde_json::Value;
+
+use super::{ArgExtractor, ToolHandler};
+use crate::index::CodeIntelEngine;
+
+/// Handler for get_call_graph tool
+pub struct GetCallGraphHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetCallGraphHandler {
+    fn name(&self) -> &'static str {
+        "get_call_graph"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let function = args.get_str("function").unwrap_or("");
+        let depth = args.get_u64_or("depth", 3) as usize;
+        engine.get_call_graph(repo, function, depth).await
+    }
+}
+
+/// Handler for get_callers tool
+pub struct GetCallersHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetCallersHandler {
+    fn name(&self) -> &'static str {
+        "get_callers"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let function = args.get_str("function").unwrap_or("");
+        let transitive = args.get_bool_or("transitive", false);
+        let max_depth = args.get_u64_or("max_depth", 5) as usize;
+        engine.get_callers(repo, function, transitive, max_depth).await
+    }
+}
+
+/// Handler for get_callees tool
+pub struct GetCalleesHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetCalleesHandler {
+    fn name(&self) -> &'static str {
+        "get_callees"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let function = args.get_str("function").unwrap_or("");
+        let transitive = args.get_bool_or("transitive", false);
+        let max_depth = args.get_u64_or("max_depth", 5) as usize;
+        engine.get_callees(repo, function, transitive, max_depth).await
+    }
+}
+
+/// Handler for find_call_path tool
+pub struct FindCallPathHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for FindCallPathHandler {
+    fn name(&self) -> &'static str {
+        "find_call_path"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let from = args.get_str("from").unwrap_or("");
+        let to = args.get_str("to").unwrap_or("");
+        engine.find_call_path(repo, from, to).await
+    }
+}
+
+/// Handler for get_complexity tool
+pub struct GetComplexityHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetComplexityHandler {
+    fn name(&self) -> &'static str {
+        "get_complexity"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let function = args.get_str("function").unwrap_or("");
+        engine.get_complexity(repo, function).await
+    }
+}
+
+/// Handler for get_function_hotspots tool
+pub struct GetFunctionHotspotsHandler;
+
+#[async_trait::async_trait]
+impl ToolHandler for GetFunctionHotspotsHandler {
+    fn name(&self) -> &'static str {
+        "get_function_hotspots"
+    }
+
+    async fn execute(&self, engine: &CodeIntelEngine, args: Value) -> Result<String> {
+        let repo = args.get_str("repo").unwrap_or("");
+        let min_connections = args.get_u64_or("min_connections", 5) as usize;
+        engine.get_function_hotspots(repo, min_connections).await
+    }
+}

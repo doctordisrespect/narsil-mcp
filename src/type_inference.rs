@@ -1,0 +1,2056 @@
+//! Type inference for dynamic languages (Python, JavaScript, TypeScript)
+//!
+//! Uses Hindley-Milner style inference with:
+//! - Flow-sensitive analysis (types can change through code)
+//! - Gradual typing (mixing typed and untyped code)
+//! - Built-in stubs for standard library
+
+use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tree_sitter::Node;
+
+use crate::cfg::{BlockId, ControlFlowGraph, StatementKind};
+
+/// Type variable identifier for inference
+pub type TypeVarId = u32;
+
+/// Inferred type representation
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Type {
+    // Primitive types
+    /// Integer type (int in Python, number in JS)
+    Int,
+    /// Floating point type
+    Float,
+    /// String type
+    String,
+    /// Boolean type
+    Bool,
+    /// None/null/undefined
+    None,
+    /// Bytes type (Python)
+    Bytes,
+
+    // Composite types
+    /// List/Array type
+    List(Box<Type>),
+    /// Dictionary/Object type
+    Dict(Box<Type>, Box<Type>),
+    /// Set type
+    Set(Box<Type>),
+    /// Tuple type
+    Tuple(Vec<Type>),
+
+    /// Callable/Function type
+    Function {
+        params: Vec<Type>,
+        ret: Box<Type>,
+    },
+
+    /// Object/class instance
+    Instance {
+        class_name: String,
+        type_args: Vec<Type>,
+    },
+
+    /// Type variable (for inference)
+    Var(TypeVarId),
+
+    /// Union type (e.g., str | None)
+    Union(Vec<Type>),
+
+    /// Optional type (shorthand for T | None)
+    Optional(Box<Type>),
+
+    /// Unknown/any type
+    Unknown,
+
+    /// Never type (unreachable code)
+    Never,
+
+    /// Literal type (for literal inference)
+    Literal(LiteralType),
+}
+
+/// Literal type values
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LiteralType {
+    Int(i64),
+    Float(String), // Use string to preserve precision
+    String(String),
+    Bool(bool),
+}
+
+impl Type {
+    /// Check if this type is a subtype of another
+    pub fn is_subtype_of(&self, other: &Type) -> bool {
+        if self == other {
+            return true;
+        }
+
+        match (self, other) {
+            // Any type is subtype of Unknown
+            (_, Type::Unknown) => true,
+            // Never is subtype of everything
+            (Type::Never, _) => true,
+            // None is subtype of Optional
+            (Type::None, Type::Optional(_)) => true,
+            // T is subtype of Optional<T>
+            (t, Type::Optional(inner)) => t.is_subtype_of(inner),
+            // Int is subtype of Float (numeric widening)
+            (Type::Int, Type::Float) => true,
+            // Literal types are subtypes of their base types
+            (Type::Literal(LiteralType::Int(_)), Type::Int) => true,
+            (Type::Literal(LiteralType::Float(_)), Type::Float) => true,
+            (Type::Literal(LiteralType::String(_)), Type::String) => true,
+            (Type::Literal(LiteralType::Bool(_)), Type::Bool) => true,
+            // List covariance
+            (Type::List(a), Type::List(b)) => a.is_subtype_of(b),
+            // Union subtyping - T is subtype of Union if T is subtype of any member
+            (t, Type::Union(types)) => types.iter().any(|u| t.is_subtype_of(u)),
+            // Union subtype - Union is subtype of T if all members are subtypes
+            (Type::Union(types), t) => types.iter().all(|u| u.is_subtype_of(t)),
+            _ => false,
+        }
+    }
+
+    /// Simplify type (e.g., flatten nested unions)
+    pub fn simplify(&self) -> Type {
+        match self {
+            Type::Union(types) => {
+                let mut simplified: Vec<Type> = Vec::new();
+                for t in types {
+                    let t = t.simplify();
+                    match t {
+                        Type::Union(inner) => simplified.extend(inner),
+                        _ => {
+                            if !simplified.contains(&t) {
+                                simplified.push(t);
+                            }
+                        }
+                    }
+                }
+                if simplified.len() == 1 {
+                    simplified.pop().unwrap()
+                } else {
+                    Type::Union(simplified)
+                }
+            }
+            Type::Optional(inner) => {
+                let inner = inner.simplify();
+                if inner == Type::None {
+                    Type::None
+                } else {
+                    Type::Optional(Box::new(inner))
+                }
+            }
+            _ => self.clone(),
+        }
+    }
+
+    /// Get human-readable type name
+    pub fn display_name(&self) -> String {
+        match self {
+            Type::Int => "int".to_string(),
+            Type::Float => "float".to_string(),
+            Type::String => "str".to_string(),
+            Type::Bool => "bool".to_string(),
+            Type::None => "None".to_string(),
+            Type::Bytes => "bytes".to_string(),
+            Type::List(inner) => format!("list[{}]", inner.display_name()),
+            Type::Dict(k, v) => format!("dict[{}, {}]", k.display_name(), v.display_name()),
+            Type::Set(inner) => format!("set[{}]", inner.display_name()),
+            Type::Tuple(types) => {
+                let inner: Vec<String> = types.iter().map(|t| t.display_name()).collect();
+                format!("tuple[{}]", inner.join(", "))
+            }
+            Type::Function { params, ret } => {
+                let params: Vec<String> = params.iter().map(|t| t.display_name()).collect();
+                format!("({}) -> {}", params.join(", "), ret.display_name())
+            }
+            Type::Instance { class_name, type_args } => {
+                if type_args.is_empty() {
+                    class_name.clone()
+                } else {
+                    let args: Vec<String> = type_args.iter().map(|t| t.display_name()).collect();
+                    format!("{}[{}]", class_name, args.join(", "))
+                }
+            }
+            Type::Var(id) => format!("T{}", id),
+            Type::Union(types) => {
+                let inner: Vec<String> = types.iter().map(|t| t.display_name()).collect();
+                inner.join(" | ")
+            }
+            Type::Optional(inner) => format!("{} | None", inner.display_name()),
+            Type::Unknown => "Any".to_string(),
+            Type::Never => "Never".to_string(),
+            Type::Literal(lit) => match lit {
+                LiteralType::Int(i) => format!("Literal[{}]", i),
+                LiteralType::Float(f) => format!("Literal[{}]", f),
+                LiteralType::String(s) => format!("Literal[\"{}\"]", s),
+                LiteralType::Bool(b) => format!("Literal[{}]", b),
+            },
+        }
+    }
+}
+
+/// Type constraint for unification
+#[derive(Debug, Clone)]
+pub enum Constraint {
+    /// T1 = T2 (equality)
+    Equal(Type, Type),
+    /// T1 is subtype of T2
+    Subtype(Type, Type),
+    /// T has attribute attr of type T2
+    HasAttr(Type, String, Type),
+    /// T is callable with params returning ret
+    Callable(Type, Vec<Type>, Type),
+    /// T has method with signature
+    HasMethod(Type, String, Vec<Type>, Type),
+}
+
+/// Type environment at a program point
+#[derive(Debug, Clone, Default)]
+pub struct TypeEnv {
+    /// Variable name -> Type
+    bindings: HashMap<String, Type>,
+    /// Type variable substitutions
+    substitutions: HashMap<TypeVarId, Type>,
+    /// Fresh type variable counter
+    next_var: TypeVarId,
+    /// Scope stack (for nested scopes)
+    scopes: Vec<HashMap<String, Type>>,
+}
+
+impl TypeEnv {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a fresh type variable
+    pub fn fresh_var(&mut self) -> Type {
+        let var = Type::Var(self.next_var);
+        self.next_var += 1;
+        var
+    }
+
+    /// Bind a variable to a type
+    pub fn bind(&mut self, name: String, ty: Type) {
+        self.bindings.insert(name, ty);
+    }
+
+    /// Look up a variable's type
+    pub fn lookup(&self, name: &str) -> Option<&Type> {
+        // Check current scope first
+        self.bindings.get(name).or_else(|| {
+            // Check parent scopes
+            for scope in self.scopes.iter().rev() {
+                if let Some(ty) = scope.get(name) {
+                    return Some(ty);
+                }
+            }
+            None
+        })
+    }
+
+    /// Enter a new scope
+    pub fn push_scope(&mut self) {
+        self.scopes.push(std::mem::take(&mut self.bindings));
+    }
+
+    /// Exit current scope
+    pub fn pop_scope(&mut self) {
+        if let Some(parent) = self.scopes.pop() {
+            self.bindings = parent;
+        }
+    }
+
+    /// Apply substitutions to resolve type variables
+    pub fn substitute(&self, ty: &Type) -> Type {
+        match ty {
+            Type::Var(id) => {
+                if let Some(resolved) = self.substitutions.get(id) {
+                    self.substitute(resolved)
+                } else {
+                    ty.clone()
+                }
+            }
+            Type::List(inner) => Type::List(Box::new(self.substitute(inner))),
+            Type::Dict(k, v) => Type::Dict(
+                Box::new(self.substitute(k)),
+                Box::new(self.substitute(v)),
+            ),
+            Type::Set(inner) => Type::Set(Box::new(self.substitute(inner))),
+            Type::Tuple(types) => {
+                Type::Tuple(types.iter().map(|t| self.substitute(t)).collect())
+            }
+            Type::Union(types) => {
+                Type::Union(types.iter().map(|t| self.substitute(t)).collect())
+            }
+            Type::Optional(inner) => Type::Optional(Box::new(self.substitute(inner))),
+            Type::Function { params, ret } => Type::Function {
+                params: params.iter().map(|t| self.substitute(t)).collect(),
+                ret: Box::new(self.substitute(ret)),
+            },
+            Type::Instance { class_name, type_args } => Type::Instance {
+                class_name: class_name.clone(),
+                type_args: type_args.iter().map(|t| self.substitute(t)).collect(),
+            },
+            _ => ty.clone(),
+        }
+    }
+
+    /// Add a type variable substitution
+    pub fn add_substitution(&mut self, var: TypeVarId, ty: Type) {
+        self.substitutions.insert(var, ty);
+    }
+
+    /// Get all variable bindings
+    pub fn all_bindings(&self) -> HashMap<String, Type> {
+        let mut all = HashMap::new();
+        for scope in &self.scopes {
+            all.extend(scope.clone());
+        }
+        all.extend(self.bindings.clone());
+        all
+    }
+}
+
+/// Function signature for type stubs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionSig {
+    pub params: Vec<(String, Type)>,
+    pub ret: Type,
+    pub is_method: bool,
+}
+
+/// Standard library type stubs
+pub struct TypeStubs {
+    /// Module -> (function_name -> signature)
+    modules: HashMap<String, HashMap<String, FunctionSig>>,
+    /// Builtin functions
+    builtins: HashMap<String, FunctionSig>,
+    /// Class definitions
+    classes: HashMap<String, ClassDef>,
+}
+
+/// Class definition for type checking
+#[derive(Debug, Clone)]
+pub struct ClassDef {
+    pub name: String,
+    pub methods: HashMap<String, FunctionSig>,
+    pub attributes: HashMap<String, Type>,
+    pub bases: Vec<String>,
+}
+
+impl TypeStubs {
+    /// Create Python standard library stubs
+    pub fn python_stdlib() -> Self {
+        let mut stubs = Self {
+            modules: HashMap::new(),
+            builtins: HashMap::new(),
+            classes: HashMap::new(),
+        };
+
+        // Builtins
+        stubs.builtins.insert(
+            "len".to_string(),
+            FunctionSig {
+                params: vec![("obj".to_string(), Type::Unknown)],
+                ret: Type::Int,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "str".to_string(),
+            FunctionSig {
+                params: vec![("obj".to_string(), Type::Unknown)],
+                ret: Type::String,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "int".to_string(),
+            FunctionSig {
+                params: vec![("obj".to_string(), Type::Unknown)],
+                ret: Type::Int,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "float".to_string(),
+            FunctionSig {
+                params: vec![("obj".to_string(), Type::Unknown)],
+                ret: Type::Float,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "bool".to_string(),
+            FunctionSig {
+                params: vec![("obj".to_string(), Type::Unknown)],
+                ret: Type::Bool,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "list".to_string(),
+            FunctionSig {
+                params: vec![("iterable".to_string(), Type::Unknown)],
+                ret: Type::List(Box::new(Type::Unknown)),
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "dict".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::Dict(Box::new(Type::Unknown), Box::new(Type::Unknown)),
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "set".to_string(),
+            FunctionSig {
+                params: vec![("iterable".to_string(), Type::Unknown)],
+                ret: Type::Set(Box::new(Type::Unknown)),
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "print".to_string(),
+            FunctionSig {
+                params: vec![("args".to_string(), Type::Unknown)],
+                ret: Type::None,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "open".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("file".to_string(), Type::String),
+                    ("mode".to_string(), Type::String),
+                ],
+                ret: Type::Instance {
+                    class_name: "TextIO".to_string(),
+                    type_args: vec![],
+                },
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "range".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("start".to_string(), Type::Int),
+                    ("stop".to_string(), Type::Int),
+                ],
+                ret: Type::Instance {
+                    class_name: "range".to_string(),
+                    type_args: vec![],
+                },
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "isinstance".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("obj".to_string(), Type::Unknown),
+                    ("classinfo".to_string(), Type::Unknown),
+                ],
+                ret: Type::Bool,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "hasattr".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("obj".to_string(), Type::Unknown),
+                    ("name".to_string(), Type::String),
+                ],
+                ret: Type::Bool,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "getattr".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("obj".to_string(), Type::Unknown),
+                    ("name".to_string(), Type::String),
+                ],
+                ret: Type::Unknown,
+                is_method: false,
+            },
+        );
+
+        // os module
+        let mut os_module = HashMap::new();
+        os_module.insert(
+            "getenv".to_string(),
+            FunctionSig {
+                params: vec![("key".to_string(), Type::String)],
+                ret: Type::Optional(Box::new(Type::String)),
+                is_method: false,
+            },
+        );
+        os_module.insert(
+            "getcwd".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::String,
+                is_method: false,
+            },
+        );
+        os_module.insert(
+            "listdir".to_string(),
+            FunctionSig {
+                params: vec![("path".to_string(), Type::String)],
+                ret: Type::List(Box::new(Type::String)),
+                is_method: false,
+            },
+        );
+        os_module.insert(
+            "path.join".to_string(),
+            FunctionSig {
+                params: vec![("paths".to_string(), Type::String)],
+                ret: Type::String,
+                is_method: false,
+            },
+        );
+        os_module.insert(
+            "path.exists".to_string(),
+            FunctionSig {
+                params: vec![("path".to_string(), Type::String)],
+                ret: Type::Bool,
+                is_method: false,
+            },
+        );
+        stubs.modules.insert("os".to_string(), os_module);
+
+        // json module
+        let mut json_module = HashMap::new();
+        json_module.insert(
+            "loads".to_string(),
+            FunctionSig {
+                params: vec![("s".to_string(), Type::String)],
+                ret: Type::Unknown,
+                is_method: false,
+            },
+        );
+        json_module.insert(
+            "dumps".to_string(),
+            FunctionSig {
+                params: vec![("obj".to_string(), Type::Unknown)],
+                ret: Type::String,
+                is_method: false,
+            },
+        );
+        json_module.insert(
+            "load".to_string(),
+            FunctionSig {
+                params: vec![("fp".to_string(), Type::Unknown)],
+                ret: Type::Unknown,
+                is_method: false,
+            },
+        );
+        json_module.insert(
+            "dump".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("obj".to_string(), Type::Unknown),
+                    ("fp".to_string(), Type::Unknown),
+                ],
+                ret: Type::None,
+                is_method: false,
+            },
+        );
+        stubs.modules.insert("json".to_string(), json_module);
+
+        // re module
+        let mut re_module = HashMap::new();
+        re_module.insert(
+            "match".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("pattern".to_string(), Type::String),
+                    ("string".to_string(), Type::String),
+                ],
+                ret: Type::Optional(Box::new(Type::Instance {
+                    class_name: "Match".to_string(),
+                    type_args: vec![],
+                })),
+                is_method: false,
+            },
+        );
+        re_module.insert(
+            "search".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("pattern".to_string(), Type::String),
+                    ("string".to_string(), Type::String),
+                ],
+                ret: Type::Optional(Box::new(Type::Instance {
+                    class_name: "Match".to_string(),
+                    type_args: vec![],
+                })),
+                is_method: false,
+            },
+        );
+        re_module.insert(
+            "findall".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("pattern".to_string(), Type::String),
+                    ("string".to_string(), Type::String),
+                ],
+                ret: Type::List(Box::new(Type::String)),
+                is_method: false,
+            },
+        );
+        stubs.modules.insert("re".to_string(), re_module);
+
+        // str class methods
+        let mut str_class = ClassDef {
+            name: "str".to_string(),
+            methods: HashMap::new(),
+            attributes: HashMap::new(),
+            bases: vec![],
+        };
+        str_class.methods.insert(
+            "split".to_string(),
+            FunctionSig {
+                params: vec![("sep".to_string(), Type::Optional(Box::new(Type::String)))],
+                ret: Type::List(Box::new(Type::String)),
+                is_method: true,
+            },
+        );
+        str_class.methods.insert(
+            "join".to_string(),
+            FunctionSig {
+                params: vec![("iterable".to_string(), Type::List(Box::new(Type::String)))],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        str_class.methods.insert(
+            "strip".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        str_class.methods.insert(
+            "lower".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        str_class.methods.insert(
+            "upper".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        str_class.methods.insert(
+            "replace".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("old".to_string(), Type::String),
+                    ("new".to_string(), Type::String),
+                ],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        str_class.methods.insert(
+            "startswith".to_string(),
+            FunctionSig {
+                params: vec![("prefix".to_string(), Type::String)],
+                ret: Type::Bool,
+                is_method: true,
+            },
+        );
+        str_class.methods.insert(
+            "endswith".to_string(),
+            FunctionSig {
+                params: vec![("suffix".to_string(), Type::String)],
+                ret: Type::Bool,
+                is_method: true,
+            },
+        );
+        stubs.classes.insert("str".to_string(), str_class);
+
+        // list class methods
+        let mut list_class = ClassDef {
+            name: "list".to_string(),
+            methods: HashMap::new(),
+            attributes: HashMap::new(),
+            bases: vec![],
+        };
+        list_class.methods.insert(
+            "append".to_string(),
+            FunctionSig {
+                params: vec![("item".to_string(), Type::Unknown)],
+                ret: Type::None,
+                is_method: true,
+            },
+        );
+        list_class.methods.insert(
+            "extend".to_string(),
+            FunctionSig {
+                params: vec![("iterable".to_string(), Type::Unknown)],
+                ret: Type::None,
+                is_method: true,
+            },
+        );
+        list_class.methods.insert(
+            "pop".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::Unknown,
+                is_method: true,
+            },
+        );
+        list_class.methods.insert(
+            "sort".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::None,
+                is_method: true,
+            },
+        );
+        list_class.methods.insert(
+            "reverse".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::None,
+                is_method: true,
+            },
+        );
+        stubs.classes.insert("list".to_string(), list_class);
+
+        // dict class methods
+        let mut dict_class = ClassDef {
+            name: "dict".to_string(),
+            methods: HashMap::new(),
+            attributes: HashMap::new(),
+            bases: vec![],
+        };
+        dict_class.methods.insert(
+            "get".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("key".to_string(), Type::Unknown),
+                    ("default".to_string(), Type::Optional(Box::new(Type::Unknown))),
+                ],
+                ret: Type::Unknown,
+                is_method: true,
+            },
+        );
+        dict_class.methods.insert(
+            "keys".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::Instance {
+                    class_name: "dict_keys".to_string(),
+                    type_args: vec![],
+                },
+                is_method: true,
+            },
+        );
+        dict_class.methods.insert(
+            "values".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::Instance {
+                    class_name: "dict_values".to_string(),
+                    type_args: vec![],
+                },
+                is_method: true,
+            },
+        );
+        dict_class.methods.insert(
+            "items".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::Instance {
+                    class_name: "dict_items".to_string(),
+                    type_args: vec![],
+                },
+                is_method: true,
+            },
+        );
+        dict_class.methods.insert(
+            "update".to_string(),
+            FunctionSig {
+                params: vec![("other".to_string(), Type::Unknown)],
+                ret: Type::None,
+                is_method: true,
+            },
+        );
+        stubs.classes.insert("dict".to_string(), dict_class);
+
+        stubs
+    }
+
+    /// Create JavaScript/TypeScript standard library stubs
+    pub fn javascript_stdlib() -> Self {
+        let mut stubs = Self {
+            modules: HashMap::new(),
+            builtins: HashMap::new(),
+            classes: HashMap::new(),
+        };
+
+        // Global functions
+        stubs.builtins.insert(
+            "parseInt".to_string(),
+            FunctionSig {
+                params: vec![("string".to_string(), Type::String)],
+                ret: Type::Int,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "parseFloat".to_string(),
+            FunctionSig {
+                params: vec![("string".to_string(), Type::String)],
+                ret: Type::Float,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "String".to_string(),
+            FunctionSig {
+                params: vec![("value".to_string(), Type::Unknown)],
+                ret: Type::String,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "Number".to_string(),
+            FunctionSig {
+                params: vec![("value".to_string(), Type::Unknown)],
+                ret: Type::Float,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "Boolean".to_string(),
+            FunctionSig {
+                params: vec![("value".to_string(), Type::Unknown)],
+                ret: Type::Bool,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "Array".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::List(Box::new(Type::Unknown)),
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "Object".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::Dict(Box::new(Type::String), Box::new(Type::Unknown)),
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "console.log".to_string(),
+            FunctionSig {
+                params: vec![("args".to_string(), Type::Unknown)],
+                ret: Type::None,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "JSON.parse".to_string(),
+            FunctionSig {
+                params: vec![("text".to_string(), Type::String)],
+                ret: Type::Unknown,
+                is_method: false,
+            },
+        );
+        stubs.builtins.insert(
+            "JSON.stringify".to_string(),
+            FunctionSig {
+                params: vec![("value".to_string(), Type::Unknown)],
+                ret: Type::String,
+                is_method: false,
+            },
+        );
+
+        // Array methods
+        let mut array_class = ClassDef {
+            name: "Array".to_string(),
+            methods: HashMap::new(),
+            attributes: HashMap::new(),
+            bases: vec![],
+        };
+        array_class.methods.insert(
+            "push".to_string(),
+            FunctionSig {
+                params: vec![("item".to_string(), Type::Unknown)],
+                ret: Type::Int,
+                is_method: true,
+            },
+        );
+        array_class.methods.insert(
+            "pop".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::Unknown,
+                is_method: true,
+            },
+        );
+        array_class.methods.insert(
+            "map".to_string(),
+            FunctionSig {
+                params: vec![("callback".to_string(), Type::Function {
+                    params: vec![Type::Unknown],
+                    ret: Box::new(Type::Unknown),
+                })],
+                ret: Type::List(Box::new(Type::Unknown)),
+                is_method: true,
+            },
+        );
+        array_class.methods.insert(
+            "filter".to_string(),
+            FunctionSig {
+                params: vec![("callback".to_string(), Type::Function {
+                    params: vec![Type::Unknown],
+                    ret: Box::new(Type::Bool),
+                })],
+                ret: Type::List(Box::new(Type::Unknown)),
+                is_method: true,
+            },
+        );
+        array_class.methods.insert(
+            "reduce".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("callback".to_string(), Type::Function {
+                        params: vec![Type::Unknown, Type::Unknown],
+                        ret: Box::new(Type::Unknown),
+                    }),
+                    ("initial".to_string(), Type::Unknown),
+                ],
+                ret: Type::Unknown,
+                is_method: true,
+            },
+        );
+        array_class.methods.insert(
+            "find".to_string(),
+            FunctionSig {
+                params: vec![("callback".to_string(), Type::Function {
+                    params: vec![Type::Unknown],
+                    ret: Box::new(Type::Bool),
+                })],
+                ret: Type::Optional(Box::new(Type::Unknown)),
+                is_method: true,
+            },
+        );
+        array_class.methods.insert(
+            "join".to_string(),
+            FunctionSig {
+                params: vec![("separator".to_string(), Type::String)],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        array_class.attributes.insert("length".to_string(), Type::Int);
+        stubs.classes.insert("Array".to_string(), array_class);
+
+        // String methods
+        let mut string_class = ClassDef {
+            name: "String".to_string(),
+            methods: HashMap::new(),
+            attributes: HashMap::new(),
+            bases: vec![],
+        };
+        string_class.methods.insert(
+            "split".to_string(),
+            FunctionSig {
+                params: vec![("separator".to_string(), Type::String)],
+                ret: Type::List(Box::new(Type::String)),
+                is_method: true,
+            },
+        );
+        string_class.methods.insert(
+            "toLowerCase".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        string_class.methods.insert(
+            "toUpperCase".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        string_class.methods.insert(
+            "trim".to_string(),
+            FunctionSig {
+                params: vec![],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        string_class.methods.insert(
+            "substring".to_string(),
+            FunctionSig {
+                params: vec![
+                    ("start".to_string(), Type::Int),
+                    ("end".to_string(), Type::Int),
+                ],
+                ret: Type::String,
+                is_method: true,
+            },
+        );
+        string_class.methods.insert(
+            "includes".to_string(),
+            FunctionSig {
+                params: vec![("searchString".to_string(), Type::String)],
+                ret: Type::Bool,
+                is_method: true,
+            },
+        );
+        string_class.methods.insert(
+            "startsWith".to_string(),
+            FunctionSig {
+                params: vec![("searchString".to_string(), Type::String)],
+                ret: Type::Bool,
+                is_method: true,
+            },
+        );
+        string_class.methods.insert(
+            "endsWith".to_string(),
+            FunctionSig {
+                params: vec![("searchString".to_string(), Type::String)],
+                ret: Type::Bool,
+                is_method: true,
+            },
+        );
+        string_class.attributes.insert("length".to_string(), Type::Int);
+        stubs.classes.insert("String".to_string(), string_class);
+
+        stubs
+    }
+
+    /// Look up a builtin function
+    pub fn lookup_builtin(&self, name: &str) -> Option<&FunctionSig> {
+        self.builtins.get(name)
+    }
+
+    /// Look up a module function
+    pub fn lookup_module_func(&self, module: &str, func: &str) -> Option<&FunctionSig> {
+        self.modules.get(module).and_then(|m| m.get(func))
+    }
+
+    /// Look up a class method
+    pub fn lookup_method(&self, class_name: &str, method: &str) -> Option<&FunctionSig> {
+        self.classes.get(class_name).and_then(|c| c.methods.get(method))
+    }
+
+    /// Look up a class attribute
+    pub fn lookup_attribute(&self, class_name: &str, attr: &str) -> Option<&Type> {
+        self.classes.get(class_name).and_then(|c| c.attributes.get(attr))
+    }
+}
+
+/// Type error during inference
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypeError {
+    /// Error message
+    pub message: String,
+    /// Line number
+    pub line: usize,
+    /// Column number
+    pub column: usize,
+    /// Error kind
+    pub kind: TypeErrorKind,
+}
+
+/// Kinds of type errors
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TypeErrorKind {
+    /// Variable used before definition
+    UndefinedVariable,
+    /// Type mismatch in assignment or call
+    TypeMismatch,
+    /// Attribute not found on type
+    AttributeNotFound,
+    /// Method not found on type
+    MethodNotFound,
+    /// Wrong number of arguments
+    ArgumentCount,
+    /// Unification failed
+    UnificationFailed,
+    /// Other error
+    Other,
+}
+
+/// Binary operator for type inference
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    FloorDiv,
+    Mod,
+    Pow,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    LShift,
+    RShift,
+}
+
+/// Unary operator
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,
+    Not,
+    BitNot,
+}
+
+/// Result of type inference for a function
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferredTypes {
+    /// Function name
+    pub function_name: String,
+    /// File path
+    pub file_path: String,
+    /// Inferred parameter types
+    pub parameters: Vec<(String, Type)>,
+    /// Inferred return type
+    pub return_type: Type,
+    /// Variable types at each line
+    pub variable_types: HashMap<usize, HashMap<String, Type>>,
+    /// Type errors found
+    pub errors: Vec<TypeError>,
+}
+
+impl InferredTypes {
+    pub fn new(function_name: &str, file_path: &str) -> Self {
+        Self {
+            function_name: function_name.to_string(),
+            file_path: file_path.to_string(),
+            parameters: Vec::new(),
+            return_type: Type::Unknown,
+            variable_types: HashMap::new(),
+            errors: Vec::new(),
+        }
+    }
+
+    /// Format as markdown
+    pub fn to_markdown(&self) -> String {
+        let mut md = String::new();
+
+        md.push_str(&format!(
+            "# Type Inference: `{}`\n\n",
+            self.function_name
+        ));
+        md.push_str(&format!("**File**: `{}`\n\n", self.file_path));
+
+        // Parameters
+        md.push_str("## Parameters\n\n");
+        if self.parameters.is_empty() {
+            md.push_str("*No parameters*\n\n");
+        } else {
+            for (name, ty) in &self.parameters {
+                md.push_str(&format!("- `{}`: `{}`\n", name, ty.display_name()));
+            }
+            md.push('\n');
+        }
+
+        // Return type
+        md.push_str(&format!(
+            "## Return Type\n\n`{}`\n\n",
+            self.return_type.display_name()
+        ));
+
+        // Variable types
+        if !self.variable_types.is_empty() {
+            md.push_str("## Variable Types by Line\n\n");
+            let mut lines: Vec<_> = self.variable_types.keys().collect();
+            lines.sort();
+            for line in lines {
+                if let Some(vars) = self.variable_types.get(line) {
+                    md.push_str(&format!("**Line {}**:\n", line));
+                    for (name, ty) in vars {
+                        md.push_str(&format!("  - `{}`: `{}`\n", name, ty.display_name()));
+                    }
+                }
+            }
+            md.push('\n');
+        }
+
+        // Errors
+        if !self.errors.is_empty() {
+            md.push_str("## ⚠️ Type Errors\n\n");
+            for error in &self.errors {
+                md.push_str(&format!(
+                    "- **Line {}:{}** ({:?}): {}\n",
+                    error.line, error.column, error.kind, error.message
+                ));
+            }
+        }
+
+        md
+    }
+}
+
+/// Main type inferencer
+pub struct TypeInferencer<'a> {
+    /// Source code
+    #[allow(dead_code)]
+    source: &'a str,
+    /// Control flow graph (optional)
+    cfg: Option<&'a ControlFlowGraph>,
+    /// Type stubs for stdlib
+    stubs: TypeStubs,
+    /// Accumulated constraints
+    constraints: Vec<Constraint>,
+    /// Type environment
+    env: TypeEnv,
+    /// Language being inferred
+    #[allow(dead_code)]
+    language: String,
+}
+
+impl<'a> TypeInferencer<'a> {
+    /// Create a new type inferencer
+    pub fn new(source: &'a str, cfg: Option<&'a ControlFlowGraph>, language: &str) -> Self {
+        let stubs = match language {
+            "python" | "py" => TypeStubs::python_stdlib(),
+            "javascript" | "js" | "typescript" | "ts" => TypeStubs::javascript_stdlib(),
+            _ => TypeStubs::python_stdlib(),
+        };
+
+        Self {
+            source,
+            cfg,
+            stubs,
+            constraints: Vec::new(),
+            env: TypeEnv::new(),
+            language: language.to_string(),
+        }
+    }
+
+    /// Infer types for a function from its CFG
+    pub fn infer_from_cfg(&mut self, params: &[(String, Option<Type>)]) -> InferredTypes {
+        let mut result = InferredTypes::new(
+            self.cfg.map(|c| c.function_name.as_str()).unwrap_or("unknown"),
+            self.cfg.map(|c| c.file_path.as_str()).unwrap_or("unknown"),
+        );
+
+        // Initialize parameters
+        for (name, annotation) in params {
+            let ty = annotation.clone().unwrap_or_else(|| self.env.fresh_var());
+            self.env.bind(name.clone(), ty.clone());
+            result.parameters.push((name.clone(), ty));
+        }
+
+        // Process CFG blocks if available
+        if let Some(cfg) = self.cfg {
+            for block_id in cfg.blocks.keys() {
+                if let Err(e) = self.infer_block(*block_id, &mut result) {
+                    result.errors.push(TypeError {
+                        message: e.to_string(),
+                        line: 0,
+                        column: 0,
+                        kind: TypeErrorKind::Other,
+                    });
+                }
+            }
+        }
+
+        // Solve constraints
+        if let Err(e) = self.solve_constraints() {
+            result.errors.push(TypeError {
+                message: e.to_string(),
+                line: 0,
+                column: 0,
+                kind: TypeErrorKind::UnificationFailed,
+            });
+        }
+
+        // Apply substitutions to get final types
+        result.return_type = self.env.substitute(&result.return_type);
+        result.parameters = result
+            .parameters
+            .into_iter()
+            .map(|(n, t)| (n, self.env.substitute(&t)))
+            .collect();
+
+        result
+    }
+
+    fn infer_block(&mut self, block_id: BlockId, result: &mut InferredTypes) -> Result<()> {
+        let cfg = self.cfg.ok_or_else(|| anyhow!("No CFG available"))?;
+        let block = cfg.blocks.get(&block_id).ok_or_else(|| anyhow!("Invalid block"))?;
+
+        for stmt in &block.statements {
+            match &stmt.kind {
+                StatementKind::Assignment { variable } => {
+                    let rhs_type = self.infer_expr_from_text(&stmt.text)?;
+                    self.env.bind(variable.clone(), rhs_type.clone());
+
+                    // Record variable type at this line
+                    result
+                        .variable_types
+                        .entry(stmt.line)
+                        .or_default()
+                        .insert(variable.clone(), rhs_type);
+                }
+                StatementKind::Return => {
+                    let ret_type = self.infer_expr_from_text(&stmt.text)?;
+                    self.constraints.push(Constraint::Equal(
+                        result.return_type.clone(),
+                        ret_type,
+                    ));
+                }
+                StatementKind::Call { function } => {
+                    // Look up function return type
+                    if let Some(sig) = self.stubs.lookup_builtin(function) {
+                        // Record the call's result type if assigned
+                        let _ = sig.ret.clone();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Infer type from expression text (simplified)
+    fn infer_expr_from_text(&mut self, text: &str) -> Result<Type> {
+        let text = text.trim();
+
+        // Check for literals
+        if let Some(ty) = self.infer_literal(text) {
+            return Ok(ty);
+        }
+
+        // Check for variable reference
+        if is_identifier(text) {
+            if let Some(ty) = self.env.lookup(text) {
+                return Ok(ty.clone());
+            } else if let Some(sig) = self.stubs.lookup_builtin(text) {
+                return Ok(Type::Function {
+                    params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+                    ret: Box::new(sig.ret.clone()),
+                });
+            }
+            return Ok(self.env.fresh_var());
+        }
+
+        // Check for list literal
+        if text.starts_with('[') && text.ends_with(']') {
+            let inner = &text[1..text.len() - 1];
+            if inner.is_empty() {
+                return Ok(Type::List(Box::new(self.env.fresh_var())));
+            }
+            // Try to infer element type from first element
+            let first = inner.split(',').next().unwrap_or("").trim();
+            let elem_type = self.infer_expr_from_text(first)?;
+            return Ok(Type::List(Box::new(elem_type)));
+        }
+
+        // Check for dict literal
+        if text.starts_with('{') && text.ends_with('}') {
+            return Ok(Type::Dict(
+                Box::new(self.env.fresh_var()),
+                Box::new(self.env.fresh_var()),
+            ));
+        }
+
+        // Check for function call
+        if let Some(paren_idx) = text.find('(') {
+            let func_name = text[..paren_idx].trim();
+            if let Some(sig) = self.stubs.lookup_builtin(func_name) {
+                return Ok(sig.ret.clone());
+            }
+            // Check for method call
+            if let Some(dot_idx) = func_name.rfind('.') {
+                let obj_name = &func_name[..dot_idx];
+                let method_name = &func_name[dot_idx + 1..];
+
+                if let Some(obj_type) = self.env.lookup(obj_name) {
+                    let class_name = match obj_type {
+                        Type::String => "str",
+                        Type::List(_) => "list",
+                        Type::Dict(_, _) => "dict",
+                        Type::Instance { class_name, .. } => class_name.as_str(),
+                        _ => return Ok(Type::Unknown),
+                    };
+                    if let Some(sig) = self.stubs.lookup_method(class_name, method_name) {
+                        return Ok(sig.ret.clone());
+                    }
+                }
+            }
+            return Ok(Type::Unknown);
+        }
+
+        // Check for binary operations
+        for (op_str, _op) in [
+            (" + ", BinOp::Add),
+            (" - ", BinOp::Sub),
+            (" * ", BinOp::Mul),
+            (" / ", BinOp::Div),
+            (" // ", BinOp::FloorDiv),
+            (" % ", BinOp::Mod),
+            (" ** ", BinOp::Pow),
+        ] {
+            if let Some(idx) = text.find(op_str) {
+                let left = &text[..idx];
+                let right = &text[idx + op_str.len()..];
+                let left_ty = self.infer_expr_from_text(left)?;
+                let right_ty = self.infer_expr_from_text(right)?;
+                return Ok(self.binary_op_result(&left_ty, &right_ty));
+            }
+        }
+
+        // Check for comparison operations (return bool)
+        for op_str in [" == ", " != ", " < ", " <= ", " > ", " >= ", " is ", " in "] {
+            if text.contains(op_str) {
+                return Ok(Type::Bool);
+            }
+        }
+
+        // Check for logical operations
+        if text.contains(" and ") || text.contains(" or ") || text.contains(" not ") {
+            return Ok(Type::Bool);
+        }
+
+        Ok(Type::Unknown)
+    }
+
+    /// Infer literal type
+    fn infer_literal(&self, text: &str) -> Option<Type> {
+        let text = text.trim();
+
+        // None/null/undefined
+        if text == "None" || text == "null" || text == "undefined" {
+            return Some(Type::None);
+        }
+
+        // Boolean
+        if text == "True" || text == "False" || text == "true" || text == "false" {
+            return Some(Type::Bool);
+        }
+
+        // String literals
+        if (text.starts_with('"') && text.ends_with('"'))
+            || (text.starts_with('\'') && text.ends_with('\''))
+            || (text.starts_with("\"\"\"") && text.ends_with("\"\"\""))
+            || (text.starts_with("'''") && text.ends_with("'''"))
+            || (text.starts_with('`') && text.ends_with('`'))
+        {
+            return Some(Type::String);
+        }
+
+        // f-string
+        if text.starts_with("f\"") || text.starts_with("f'") {
+            return Some(Type::String);
+        }
+
+        // Integer
+        if text.parse::<i64>().is_ok() {
+            return Some(Type::Int);
+        }
+
+        // Hex/octal/binary
+        if text.starts_with("0x") || text.starts_with("0o") || text.starts_with("0b") {
+            return Some(Type::Int);
+        }
+
+        // Float
+        if text.parse::<f64>().is_ok() {
+            return Some(Type::Float);
+        }
+
+        None
+    }
+
+    /// Get result type of binary operation
+    fn binary_op_result(&self, left: &Type, right: &Type) -> Type {
+        match (left, right) {
+            (Type::Int, Type::Int) => Type::Int,
+            (Type::Float, Type::Float) => Type::Float,
+            (Type::Int, Type::Float) | (Type::Float, Type::Int) => Type::Float,
+            (Type::String, Type::String) => Type::String,
+            (Type::String, Type::Int) | (Type::Int, Type::String) => Type::String, // string repetition
+            (Type::List(a), Type::List(b)) if a == b => Type::List(a.clone()),
+            _ => Type::Unknown,
+        }
+    }
+
+    /// Solve accumulated constraints
+    fn solve_constraints(&mut self) -> Result<()> {
+        // Clone constraints to avoid borrow conflicts
+        let constraints = self.constraints.clone();
+        for constraint in constraints {
+            match constraint {
+                Constraint::Equal(t1, t2) => {
+                    self.unify(&t1, &t2)?;
+                }
+                Constraint::Subtype(sub, sup) => {
+                    if !sub.is_subtype_of(&sup) {
+                        // Add substitution for type variables
+                        if let Type::Var(id) = sub {
+                            self.env.add_substitution(id, sup.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Unify two types
+    fn unify(&mut self, t1: &Type, t2: &Type) -> Result<()> {
+        match (t1, t2) {
+            (Type::Var(id), t) | (t, Type::Var(id)) => {
+                if let Type::Var(id2) = t {
+                    if id == id2 {
+                        return Ok(());
+                    }
+                }
+                self.env.add_substitution(*id, t.clone());
+                Ok(())
+            }
+            (Type::List(a), Type::List(b)) => self.unify(a, b),
+            (Type::Dict(k1, v1), Type::Dict(k2, v2)) => {
+                self.unify(k1, k2)?;
+                self.unify(v1, v2)
+            }
+            (Type::Optional(a), Type::Optional(b)) => self.unify(a, b),
+            (Type::Function { params: p1, ret: r1 }, Type::Function { params: p2, ret: r2 }) => {
+                if p1.len() != p2.len() {
+                    return Err(anyhow!("Function parameter count mismatch"));
+                }
+                for (a, b) in p1.iter().zip(p2.iter()) {
+                    self.unify(a, b)?;
+                }
+                self.unify(r1, r2)
+            }
+            (a, b) if a == b => Ok(()),
+            (Type::Unknown, _) | (_, Type::Unknown) => Ok(()),
+            _ => Err(anyhow!("Cannot unify {} with {}", t1.display_name(), t2.display_name())),
+        }
+    }
+
+    /// Infer types from a tree-sitter node
+    pub fn infer_from_node(&mut self, node: Node, source: &[u8]) -> Result<InferredTypes> {
+        let function_name = extract_function_name(node, source).unwrap_or_else(|| "anonymous".to_string());
+        let file_path = "";
+
+        let mut result = InferredTypes::new(&function_name, file_path);
+
+        // Extract parameters
+        if let Some(params_node) = find_child_by_kind(node, "parameters")
+            .or_else(|| find_child_by_kind(node, "formal_parameters"))
+        {
+            self.extract_parameters(params_node, source, &mut result)?;
+        }
+
+        // Process function body
+        if let Some(body) = find_child_by_kind(node, "block")
+            .or_else(|| find_child_by_kind(node, "statement_block"))
+        {
+            self.process_node(body, source, &mut result)?;
+        }
+
+        // Solve constraints
+        if let Err(e) = self.solve_constraints() {
+            result.errors.push(TypeError {
+                message: e.to_string(),
+                line: 0,
+                column: 0,
+                kind: TypeErrorKind::UnificationFailed,
+            });
+        }
+
+        // Apply substitutions
+        result.return_type = self.env.substitute(&result.return_type);
+        result.parameters = result
+            .parameters
+            .into_iter()
+            .map(|(n, t)| (n, self.env.substitute(&t)))
+            .collect();
+
+        Ok(result)
+    }
+
+    fn extract_parameters(
+        &mut self,
+        node: Node,
+        source: &[u8],
+        result: &mut InferredTypes,
+    ) -> Result<()> {
+        let mut cursor = node.walk();
+        if cursor.goto_first_child() {
+            loop {
+                let child = cursor.node();
+                let kind = child.kind();
+
+                if kind == "identifier" || kind == "typed_parameter" || kind == "required_parameter" {
+                    if let Ok(text) = child.utf8_text(source) {
+                        let name = text.split(':').next().unwrap_or(text).trim().to_string();
+                        if !name.is_empty() && name != "self" && name != "this" {
+                            let ty = self.env.fresh_var();
+                            self.env.bind(name.clone(), ty.clone());
+                            result.parameters.push((name, ty));
+                        }
+                    }
+                }
+
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn process_node(
+        &mut self,
+        node: Node,
+        source: &[u8],
+        result: &mut InferredTypes,
+    ) -> Result<()> {
+        let kind = node.kind();
+        let line = node.start_position().row + 1;
+
+        match kind {
+            "assignment" | "expression_statement" => {
+                if let Ok(text) = node.utf8_text(source) {
+                    if let Some(eq_idx) = text.find('=') {
+                        let var = text[..eq_idx].trim();
+                        let expr = text[eq_idx + 1..].trim();
+
+                        if is_identifier(var) {
+                            let ty = self.infer_expr_from_text(expr)?;
+                            self.env.bind(var.to_string(), ty.clone());
+                            result
+                                .variable_types
+                                .entry(line)
+                                .or_default()
+                                .insert(var.to_string(), ty);
+                        }
+                    }
+                }
+            }
+            "return_statement" => {
+                if let Ok(text) = node.utf8_text(source) {
+                    let expr = text.strip_prefix("return").unwrap_or(text).trim();
+                    if !expr.is_empty() {
+                        let ty = self.infer_expr_from_text(expr)?;
+                        result.return_type = ty;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        if cursor.goto_first_child() {
+            loop {
+                self.process_node(cursor.node(), source, result)?;
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check for type errors in code
+    pub fn check_type_errors(&mut self) -> Vec<TypeError> {
+        let mut errors = Vec::new();
+
+        // Check for uses of undefined variables
+        if let Some(cfg) = self.cfg {
+            for block in cfg.blocks.values() {
+                for stmt in &block.statements {
+                    let text = &stmt.text;
+                    let vars = extract_identifiers(text);
+
+                    for var in vars {
+                        if self.env.lookup(&var).is_none() && self.stubs.lookup_builtin(&var).is_none() {
+                            // Check if it's a keyword or literal
+                            if !is_keyword(&var) && self.infer_literal(&var).is_none() {
+                                errors.push(TypeError {
+                                    message: format!("Undefined variable: {}", var),
+                                    line: stmt.line,
+                                    column: 0,
+                                    kind: TypeErrorKind::UndefinedVariable,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        errors
+    }
+}
+
+// Helper functions
+
+fn is_identifier(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() {
+        return false;
+    }
+    let first = s.chars().next().unwrap();
+    if !first.is_alphabetic() && first != '_' {
+        return false;
+    }
+    s.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+fn is_keyword(s: &str) -> bool {
+    matches!(
+        s,
+        // Python keywords
+        "and" | "as" | "assert" | "async" | "await" | "break" | "class" | "continue"
+            | "def" | "del" | "elif" | "else" | "except" | "finally" | "for" | "from"
+            | "global" | "if" | "import" | "in" | "is" | "lambda" | "nonlocal" | "not"
+            | "or" | "pass" | "raise" | "return" | "try" | "while" | "with" | "yield"
+            // JavaScript keywords
+            | "const" | "let" | "var" | "function" | "new" | "typeof" | "instanceof"
+            | "switch" | "case" | "default" | "throw" | "catch"
+            // Common literals
+            | "None" | "True" | "False" | "null" | "undefined" | "true" | "false"
+            | "self" | "this"
+    )
+}
+
+fn extract_identifiers(text: &str) -> Vec<String> {
+    let mut identifiers = Vec::new();
+    let mut current = String::new();
+
+    for c in text.chars() {
+        if c.is_alphanumeric() || c == '_' {
+            current.push(c);
+        } else {
+            if !current.is_empty() && is_identifier(&current) && !is_keyword(&current) {
+                identifiers.push(current.clone());
+            }
+            current.clear();
+        }
+    }
+
+    if !current.is_empty() && is_identifier(&current) && !is_keyword(&current) {
+        identifiers.push(current);
+    }
+
+    identifiers
+}
+
+fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+    let mut cursor = node.walk();
+    if cursor.goto_first_child() {
+        loop {
+            if cursor.node().kind() == kind {
+                return Some(cursor.node());
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+    None
+}
+
+fn extract_function_name(node: Node, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    if cursor.goto_first_child() {
+        loop {
+            let child = cursor.node();
+            if child.kind() == "identifier" || child.kind() == "name" {
+                return child.utf8_text(source).ok().map(|s| s.to_string());
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_type_display_name() {
+        assert_eq!(Type::Int.display_name(), "int");
+        assert_eq!(Type::String.display_name(), "str");
+        assert_eq!(Type::Bool.display_name(), "bool");
+        assert_eq!(Type::None.display_name(), "None");
+        assert_eq!(Type::Unknown.display_name(), "Any");
+
+        let list = Type::List(Box::new(Type::Int));
+        assert_eq!(list.display_name(), "list[int]");
+
+        let dict = Type::Dict(Box::new(Type::String), Box::new(Type::Int));
+        assert_eq!(dict.display_name(), "dict[str, int]");
+
+        let func = Type::Function {
+            params: vec![Type::Int, Type::String],
+            ret: Box::new(Type::Bool),
+        };
+        assert_eq!(func.display_name(), "(int, str) -> bool");
+    }
+
+    #[test]
+    fn test_type_subtyping() {
+        assert!(Type::Int.is_subtype_of(&Type::Int));
+        assert!(Type::Int.is_subtype_of(&Type::Float));
+        assert!(Type::Int.is_subtype_of(&Type::Unknown));
+        assert!(Type::Never.is_subtype_of(&Type::Int));
+        assert!(Type::None.is_subtype_of(&Type::Optional(Box::new(Type::Int))));
+        assert!(Type::Int.is_subtype_of(&Type::Optional(Box::new(Type::Int))));
+    }
+
+    #[test]
+    fn test_type_env() {
+        let mut env = TypeEnv::new();
+
+        env.bind("x".to_string(), Type::Int);
+        assert_eq!(env.lookup("x"), Some(&Type::Int));
+        assert_eq!(env.lookup("y"), None);
+
+        let var = env.fresh_var();
+        assert!(matches!(var, Type::Var(0)));
+
+        let var2 = env.fresh_var();
+        assert!(matches!(var2, Type::Var(1)));
+    }
+
+    #[test]
+    fn test_type_env_scopes() {
+        let mut env = TypeEnv::new();
+
+        env.bind("x".to_string(), Type::Int);
+        env.push_scope();
+        env.bind("y".to_string(), Type::String);
+
+        assert!(env.lookup("x").is_some());
+        assert!(env.lookup("y").is_some());
+
+        env.pop_scope();
+        assert!(env.lookup("x").is_some());
+        assert!(env.lookup("y").is_none());
+    }
+
+    #[test]
+    fn test_type_stubs_python() {
+        let stubs = TypeStubs::python_stdlib();
+
+        let len_sig = stubs.lookup_builtin("len").unwrap();
+        assert_eq!(len_sig.ret, Type::Int);
+
+        let str_sig = stubs.lookup_builtin("str").unwrap();
+        assert_eq!(str_sig.ret, Type::String);
+
+        let getenv = stubs.lookup_module_func("os", "getenv").unwrap();
+        assert!(matches!(getenv.ret, Type::Optional(_)));
+
+        let split = stubs.lookup_method("str", "split").unwrap();
+        assert!(matches!(split.ret, Type::List(_)));
+    }
+
+    #[test]
+    fn test_type_stubs_javascript() {
+        let stubs = TypeStubs::javascript_stdlib();
+
+        let parse_int = stubs.lookup_builtin("parseInt").unwrap();
+        assert_eq!(parse_int.ret, Type::Int);
+
+        let push = stubs.lookup_method("Array", "push").unwrap();
+        assert_eq!(push.ret, Type::Int);
+
+        let length = stubs.lookup_attribute("Array", "length").unwrap();
+        assert_eq!(*length, Type::Int);
+    }
+
+    #[test]
+    fn test_infer_literals() {
+        let inferencer = TypeInferencer::new("", None, "python");
+
+        assert_eq!(inferencer.infer_literal("42"), Some(Type::Int));
+        assert_eq!(inferencer.infer_literal("3.14"), Some(Type::Float));
+        assert_eq!(inferencer.infer_literal("\"hello\""), Some(Type::String));
+        assert_eq!(inferencer.infer_literal("True"), Some(Type::Bool));
+        assert_eq!(inferencer.infer_literal("None"), Some(Type::None));
+        assert_eq!(inferencer.infer_literal("foo"), None);
+    }
+
+    #[test]
+    fn test_infer_expr() {
+        let mut inferencer = TypeInferencer::new("", None, "python");
+        inferencer.env.bind("x".to_string(), Type::Int);
+
+        assert_eq!(inferencer.infer_expr_from_text("42").unwrap(), Type::Int);
+        assert_eq!(inferencer.infer_expr_from_text("\"hello\"").unwrap(), Type::String);
+        assert_eq!(inferencer.infer_expr_from_text("x").unwrap(), Type::Int);
+        assert!(matches!(
+            inferencer.infer_expr_from_text("[]").unwrap(),
+            Type::List(_)
+        ));
+        assert!(matches!(
+            inferencer.infer_expr_from_text("{}").unwrap(),
+            Type::Dict(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_infer_binary_ops() {
+        let mut inferencer = TypeInferencer::new("", None, "python");
+        inferencer.env.bind("x".to_string(), Type::Int);
+        inferencer.env.bind("y".to_string(), Type::Int);
+
+        assert_eq!(inferencer.infer_expr_from_text("x + y").unwrap(), Type::Int);
+        assert_eq!(inferencer.infer_expr_from_text("x == y").unwrap(), Type::Bool);
+        assert_eq!(inferencer.infer_expr_from_text("x > y").unwrap(), Type::Bool);
+    }
+
+    #[test]
+    fn test_infer_function_call() {
+        let mut inferencer = TypeInferencer::new("", None, "python");
+
+        assert_eq!(inferencer.infer_expr_from_text("len([])").unwrap(), Type::Int);
+        assert_eq!(inferencer.infer_expr_from_text("str(42)").unwrap(), Type::String);
+    }
+
+    #[test]
+    fn test_type_simplify() {
+        let union = Type::Union(vec![Type::Int, Type::Int]);
+        let simplified = union.simplify();
+        assert_eq!(simplified, Type::Int);
+
+        let nested = Type::Union(vec![
+            Type::Union(vec![Type::Int, Type::String]),
+            Type::Bool,
+        ]);
+        let simplified = nested.simplify();
+        assert!(matches!(simplified, Type::Union(v) if v.len() == 3));
+    }
+
+    #[test]
+    fn test_is_identifier() {
+        assert!(is_identifier("foo"));
+        assert!(is_identifier("_bar"));
+        assert!(is_identifier("baz123"));
+        assert!(!is_identifier("123"));
+        assert!(!is_identifier("foo-bar"));
+        assert!(!is_identifier(""));
+    }
+
+    #[test]
+    fn test_is_keyword() {
+        assert!(is_keyword("if"));
+        assert!(is_keyword("return"));
+        assert!(is_keyword("def"));
+        assert!(is_keyword("const"));
+        assert!(is_keyword("None"));
+        assert!(!is_keyword("foo"));
+    }
+
+    #[test]
+    fn test_extract_identifiers() {
+        let ids = extract_identifiers("x + y * z");
+        assert!(ids.contains(&"x".to_string()));
+        assert!(ids.contains(&"y".to_string()));
+        assert!(ids.contains(&"z".to_string()));
+
+        let ids2 = extract_identifiers("if x and y:");
+        // 'if' and 'and' are keywords, should be filtered
+        assert!(!ids2.contains(&"if".to_string()));
+        assert!(!ids2.contains(&"and".to_string()));
+        assert!(ids2.contains(&"x".to_string()));
+        assert!(ids2.contains(&"y".to_string()));
+    }
+
+    #[test]
+    fn test_inferred_types_markdown() {
+        let mut result = InferredTypes::new("test_func", "test.py");
+        result.parameters = vec![
+            ("x".to_string(), Type::Int),
+            ("y".to_string(), Type::String),
+        ];
+        result.return_type = Type::Bool;
+
+        let md = result.to_markdown();
+        assert!(md.contains("test_func"));
+        assert!(md.contains("int"));
+        assert!(md.contains("str"));
+        assert!(md.contains("bool"));
+    }
+
+    #[test]
+    fn test_unification() {
+        let mut inferencer = TypeInferencer::new("", None, "python");
+
+        // Var with concrete
+        let var = inferencer.env.fresh_var();
+        assert!(inferencer.unify(&var, &Type::Int).is_ok());
+
+        // List unification
+        let list1 = Type::List(Box::new(inferencer.env.fresh_var()));
+        let list2 = Type::List(Box::new(Type::String));
+        assert!(inferencer.unify(&list1, &list2).is_ok());
+
+        // Mismatched types
+        assert!(inferencer.unify(&Type::Int, &Type::String).is_err());
+    }
+
+    #[test]
+    fn test_type_error_kinds() {
+        let error = TypeError {
+            message: "test error".to_string(),
+            line: 1,
+            column: 5,
+            kind: TypeErrorKind::UndefinedVariable,
+        };
+
+        assert_eq!(error.kind, TypeErrorKind::UndefinedVariable);
+        assert_eq!(error.line, 1);
+    }
+}

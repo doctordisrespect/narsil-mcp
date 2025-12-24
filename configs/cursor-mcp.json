@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "narsil-mcp": {
+      "command": "narsil-mcp",
+      "args": [
+        "--repos", "."
+      ],
+      "enabled": true
+    }
+  }
+}

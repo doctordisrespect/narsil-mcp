@@ -1,0 +1,58 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE and editor files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Logs
+*.log
+logs/
+
+# Index and cache files (project-specific)
+*.index
+.narsil-mcp-cache/
+.persist/
+
+# Local MCP config (contains absolute paths)
+.mcp.json
+
+# Archived docs (not for public release)
+docs/archive/
+
+# Test artifacts
+*.profraw
+*.profdata
+coverage/
+
+# Backup files
+*.bak
+*.backup
+*.orig

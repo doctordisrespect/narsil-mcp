@@ -1,0 +1,894 @@
+# narsil-mcp
+
+> The blazing-fast, privacy-first MCP server for deep code intelligence
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+[![Tests](https://img.shields.io/badge/tests-255%20passed-brightgreen.svg)](https://github.com/postrv/narsil-mcp)
+[![MCP](https://img.shields.io/badge/MCP-compatible-blue.svg)](https://modelcontextprotocol.io)
+
+A Rust-powered MCP (Model Context Protocol) server providing AI assistants with deep code understanding through 74 specialized tools.
+
+## Why narsil-mcp?
+
+| Feature | narsil-mcp | XRAY | Serena | GitHub MCP |
+|---------|------------|------|--------|------------|
+| **Languages** | 14 | 4 | 30+ (LSP) | N/A |
+| **Neural Search** | Yes | No | No | No |
+| **Taint Analysis** | Yes | No | No | No |
+| **SBOM/Licenses** | Yes | No | No | Partial |
+| **Offline/Local** | Yes | Yes | Yes | No |
+| **WASM/Browser** | Yes | No | No | No |
+| **Call Graphs** | Yes | Partial | No | No |
+| **Type Inference** | Yes | No | No | No |
+
+## Key Features
+
+- **Code Intelligence** - Symbol extraction, semantic search, call graph analysis
+- **Neural Semantic Search** - Find similar code using embeddings (Voyage AI, OpenAI)
+- **Security Analysis** - Taint analysis, vulnerability scanning, OWASP/CWE coverage
+- **Supply Chain Security** - SBOM generation, dependency auditing, license compliance
+- **Advanced Analysis** - Control flow graphs, data flow analysis, dead code detection
+
+### Why Choose narsil-mcp?
+
+- **Written in Rust** - Blazingly fast, memory-safe, single binary (~15MB)
+- **Tree-sitter powered** - Accurate, incremental parsing for 14 languages
+- **Zero config** - Point at repos and go
+- **MCP compliant** - Works with Claude, Cursor, VS Code Copilot, and any MCP client
+- **Privacy-first** - Fully local, no data leaves your machine
+- **Parallel indexing** - Uses all cores via Rayon
+- **Smart excerpts** - Expands to complete syntactic scopes
+- **Security-first** - Built-in vulnerability detection and taint analysis
+- **Neural embeddings** - Optional semantic search with Voyage AI or OpenAI
+- **WASM support** - Run in browser with WebAssembly build
+- **Real-time streaming** - Results as indexing progresses for large repos
+
+## Supported Languages
+
+| Language | Extensions | Symbols Extracted |
+|----------|------------|-------------------|
+| Rust | `.rs` | functions, structs, enums, traits, impls, mods |
+| Python | `.py`, `.pyi` | functions, classes |
+| JavaScript | `.js`, `.jsx`, `.mjs` | functions, classes, methods, variables |
+| TypeScript | `.ts`, `.tsx` | functions, classes, interfaces, types, enums |
+| Go | `.go` | functions, methods, types |
+| C | `.c`, `.h` | functions, structs, enums, typedefs |
+| C++ | `.cpp`, `.cc`, `.hpp` | functions, classes, structs, namespaces |
+| Java | `.java` | methods, classes, interfaces, enums |
+| C# | `.cs` | methods, classes, interfaces, structs, enums, delegates, namespaces |
+| **Bash** | `.sh`, `.bash`, `.zsh` | functions, variables |
+| **Ruby** | `.rb`, `.rake`, `.gemspec` | methods, classes, modules |
+| **Kotlin** | `.kt`, `.kts` | functions, classes, objects, interfaces |
+| **PHP** | `.php`, `.phtml` | functions, methods, classes, interfaces, traits |
+
+## Installation
+
+### One-Click Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/postrv/narsil-mcp/main/install.sh | bash
+```
+
+### From Source
+
+```bash
+# Clone and build (requires Rust 1.70+)
+git clone git@github.com:postrv/narsil-mcp.git
+cd narsil-mcp
+cargo build --release
+
+# Binary will be at target/release/narsil-mcp
+```
+
+### Feature Builds
+
+narsil-mcp supports different feature sets for different use cases:
+
+```bash
+# Default build - native MCP server (~15MB)
+cargo build --release
+
+# With neural vector search (~18MB) - adds TF-IDF similarity
+cargo build --release --features neural
+
+# With ONNX model support (~50MB) - adds local neural embeddings
+cargo build --release --features neural-onnx
+
+# With embedded visualization frontend (~31MB)
+cargo build --release --features frontend
+
+# For browser/WASM usage
+cargo build --release --target wasm32-unknown-unknown --features wasm
+```
+
+| Feature | Description | Size |
+|---------|-------------|------|
+| `native` (default) | Full MCP server with all tools | ~30MB |
+| `frontend` | + Embedded visualization web UI | ~31MB |
+| `neural` | + TF-IDF vector search, API embeddings | ~32MB |
+| `neural-onnx` | + Local ONNX model inference | ~50MB |
+| `wasm` | Browser build (no file system, git) | ~3MB |
+
+## Usage
+
+### Basic Usage
+
+```bash
+# Index a single repository
+narsil-mcp --repos /path/to/your/project
+
+# Index multiple repositories
+narsil-mcp --repos ~/projects/project1 --repos ~/projects/project2
+
+# Enable verbose logging
+narsil-mcp --repos /path/to/project --verbose
+
+# Force re-index on startup
+narsil-mcp --repos /path/to/project --reindex
+```
+
+### Full Feature Set
+
+```bash
+narsil-mcp \
+  --repos ~/projects/my-app \
+  --git \           # Enable git blame, history, contributors
+  --call-graph \    # Enable function call analysis
+  --persist \       # Save index to disk for fast startup
+  --watch \         # Auto-reindex on file changes
+  --lsp \           # Enable LSP for hover, go-to-definition
+  --streaming \     # Stream large result sets
+  --remote \        # Enable GitHub remote repo support
+  --neural \        # Enable neural semantic embeddings
+  --neural-backend api \  # Backend: "api" (Voyage/OpenAI) or "onnx"
+  --neural-model voyage-code-2  # Model to use
+```
+
+**Note:** Neural embeddings require an API key. Set one of:
+- `EMBEDDING_API_KEY`
+- `VOYAGE_API_KEY` (for Voyage AI)
+- `OPENAI_API_KEY` (for OpenAI)
+
+### Visualization Frontend
+
+narsil-mcp includes an optional web-based visualization frontend for exploring call graphs, import dependencies, and code structure interactively.
+
+**Option 1: Embedded Frontend (Recommended)**
+
+Build with the `frontend` feature to embed the visualization UI in the binary:
+
+```bash
+# Build with embedded frontend
+cargo build --release --features frontend
+
+# Run with HTTP server
+./target/release/narsil-mcp --repos ~/project --http --call-graph
+
+# Open http://localhost:3000 in your browser
+```
+
+**Option 2: Development Mode**
+
+For frontend development, run the backend and frontend separately:
+
+```bash
+# Terminal 1: Start the API server
+./target/release/narsil-mcp --repos ~/project --http --call-graph
+
+# Terminal 2: Start the frontend dev server
+cd frontend
+npm install
+npm run dev
+# Frontend runs on http://localhost:5173, connects to API on :3000
+```
+
+**Features:**
+- Interactive graph visualization with Cytoscape.js
+- Multiple views: call graph, import graph, symbol references
+- Complexity metrics overlay with color coding
+- Security vulnerability highlighting
+- Depth control and focused exploration (double-click to drill down)
+- Multiple layout algorithms (hierarchical, breadth-first, circle)
+
+### Neural Semantic Search (Phase 7)
+
+Neural embeddings enable true semantic code search - finding functionally similar code even when variable names, comments, and structure differ. This is powered by code-specialized embedding models.
+
+**Supported Backends:**
+
+| Backend | Flag | Models | Best For |
+|---------|------|--------|----------|
+| Voyage AI | `--neural-backend api` | `voyage-code-2`, `voyage-code-3` | Code-specific embeddings, best accuracy |
+| OpenAI | `--neural-backend api` | `text-embedding-3-small`, `text-embedding-3-large` | General embeddings, wide availability |
+| ONNX | `--neural-backend onnx` | Local models | Offline usage, no API costs |
+
+**Setup:**
+
+```bash
+# Using Voyage AI (recommended for code)
+export VOYAGE_API_KEY="your-key-here"
+narsil-mcp --repos ~/project --neural --neural-backend api --neural-model voyage-code-2
+
+# Using OpenAI
+export OPENAI_API_KEY="your-key-here"
+narsil-mcp --repos ~/project --neural --neural-backend api --neural-model text-embedding-3-small
+
+# Using local ONNX model (no API key needed)
+narsil-mcp --repos ~/project --neural --neural-backend onnx
+```
+
+**Use Cases:**
+
+- **Semantic clone detection**: Find copy-pasted code that was renamed/refactored
+- **Similar function search**: "Find functions that do pagination" even if named differently
+- **Code deduplication**: Identify candidates for extracting shared utilities
+- **Learning from examples**: Find similar patterns to code you're working with
+
+**Example queries:**
+
+```
+# These find similar code even with different naming:
+neural_search("function that validates email addresses")
+neural_search("error handling with retry logic")
+find_semantic_clones("my_function")  # Find Type-3/4 clones
+```
+
+### Type Inference (Phase 8)
+
+Built-in type inference for dynamic languages without requiring external type checkers (mypy, tsc). Uses data flow analysis to infer types at each program point.
+
+**Supported Languages:** Python, JavaScript, TypeScript
+
+**How it works:**
+
+1. Analyzes assignments, function calls, and operators
+2. Tracks type flow through variables
+3. Infers types at each usage point
+4. Detects potential type errors
+
+**Example usage:**
+
+```python
+# Python code
+def process(data):
+    result = data.split(",")  # result: list[str]
+    count = len(result)       # count: int
+    return count * 2          # returns: int
+```
+
+The `infer_types` tool will show:
+- `data` - `str` (inferred from `.split()` call)
+- `result` - `list[str]`
+- `count` - `int`
+
+**Available tools:**
+
+| Tool | Description |
+|------|-------------|
+| `infer_types` | Get inferred types for all variables in a function |
+| `check_type_errors` | Find potential type mismatches without running mypy/tsc |
+| `get_typed_taint_flow` | Enhanced security analysis combining types with taint tracking |
+
+**Type error detection examples:**
+
+```javascript
+// JavaScript - detected issues:
+function calc(x) {
+    if (typeof x === 'string') {
+        return x * 2;  // Warning: string * number
+    }
+    return x.toUpperCase();  // Warning: number has no toUpperCase
+}
+```
+
+### MCP Configuration
+
+**Claude Desktop** (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "narsil-mcp": {
+      "command": "/path/to/narsil-mcp",
+      "args": ["--repos", "/path/to/your/projects"]
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "narsil-mcp": {
+      "command": "narsil-mcp",
+      "args": ["--repos", "~/code/my-project"]
+    }
+  }
+}
+```
+
+**VS Code + GitHub Copilot** (`.vscode/mcp.json`):
+```json
+{
+  "servers": {
+    "narsil-mcp": {
+      "command": "/path/to/narsil-mcp",
+      "args": [
+        "--repos", "${workspaceFolder}",
+        "--git",
+        "--call-graph"
+      ]
+    }
+  }
+}
+```
+
+> **Note for Copilot Enterprise**: MCP support requires VS Code 1.102+ and must be enabled by your organization administrator.
+
+### WebAssembly (Browser) Usage (Phase 9)
+
+narsil-mcp can run entirely in the browser via WebAssembly. This provides symbol extraction, search, and similarity analysis without a backend server - perfect for browser-based IDEs, code review tools, or educational platforms.
+
+**Features available in WASM:**
+- Multi-language parsing (Rust, Python, JS, TS, Go, C, C++, Java, C#)
+- Symbol extraction (functions, classes, structs, etc.)
+- Full-text search with BM25 ranking
+- TF-IDF code similarity search
+- In-memory file storage
+
+**Not available in WASM** (requires native build):
+- Git integration
+- File system watching
+- LSP integration
+- Neural embeddings (API calls)
+- Index persistence
+
+**Building the WASM module:**
+
+The WASM build requires a C compiler that supports WASM targets (for tree-sitter and compression libraries).
+
+```bash
+# Prerequisites
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack
+
+# Install WASM-compatible C toolchain (choose one):
+# Option 1: Using Emscripten (recommended)
+brew install emscripten  # macOS
+# or: sudo apt install emscripten  # Ubuntu
+
+# Option 2: Using WASI SDK
+# Download from https://github.com/WebAssembly/wasi-sdk/releases
+
+# Build for web (browsers)
+./scripts/build-wasm.sh
+
+# Build for bundlers (webpack, vite, etc.)
+./scripts/build-wasm.sh bundler
+
+# Build for Node.js
+./scripts/build-wasm.sh nodejs
+
+# Output will be in pkg/
+```
+
+**Build targets:**
+
+| Target | Use Case | Output |
+|--------|----------|--------|
+| `web` | Direct browser usage, CDN | ES modules with init() |
+| `bundler` | Webpack, Vite, Rollup | ES modules for bundlers |
+| `nodejs` | Node.js applications | CommonJS modules |
+| `deno` | Deno runtime | ES modules for Deno |
+
+**Installation (npm):**
+
+```bash
+npm install @narsil-mcp/wasm
+# or
+yarn add @narsil-mcp/wasm
+```
+
+**Basic Usage (JavaScript/TypeScript):**
+
+```typescript
+import { CodeIntelClient } from '@narsil-mcp/wasm';
+
+// Create and initialize the client
+const client = new CodeIntelClient();
+await client.init();
+
+// Index files
+client.indexFile('src/main.rs', rustSourceCode);
+client.indexFile('src/lib.py', pythonSourceCode);
+
+// Find symbols
+const symbols = client.findSymbols('Handler');
+const classes = client.findSymbols(null, 'class');
+
+// Search code
+const results = client.search('error handling');
+
+// Find similar code
+const similar = client.findSimilar('fn process_request(req: Request) -> Response');
+
+// Get statistics
+console.log(client.stats()); // { files: 2, symbols: 15, embeddings: 12 }
+```
+
+**React Example:**
+
+```tsx
+import { useEffect, useState } from 'react';
+import { CodeIntelClient, Symbol } from '@narsil-mcp/wasm';
+
+function CodeExplorer({ files }: { files: Record<string, string> }) {
+  const [client, setClient] = useState<CodeIntelClient | null>(null);
+  const [symbols, setSymbols] = useState<Symbol[]>([]);
+
+  useEffect(() => {
+    const init = async () => {
+      const c = new CodeIntelClient();
+      await c.init();
+
+      // Index all files
+      for (const [path, content] of Object.entries(files)) {
+        c.indexFile(path, content);
+      }
+
+      setClient(c);
+      setSymbols(c.findSymbols());
+    };
+    init();
+  }, [files]);
+
+  return (
+    <ul>
+      {symbols.map(s => (
+        <li key={`${s.file_path}:${s.name}`}>
+          {s.kind}: {s.name} ({s.file_path}:{s.start_line})
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+**Low-Level API (WasmCodeIntel):**
+
+For more control, use the low-level `WasmCodeIntel` class directly:
+
+```typescript
+import init, { WasmCodeIntel } from '@narsil-mcp/wasm';
+
+await init();  // Initialize WASM module
+
+const engine = new WasmCodeIntel();
+engine.index_file('main.rs', code);
+
+// Returns JSON strings - parse them yourself
+const symbolsJson = engine.find_symbols(null, 'function');
+const symbols = JSON.parse(symbolsJson);
+```
+
+**WASM API Reference:**
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `indexFile(path, content)` | Index a single file | `boolean` |
+| `indexFiles(files)` | Bulk index `[{path, content}]` | `number` (count) |
+| `findSymbols(pattern?, kind?)` | Find symbols by pattern/kind | `Symbol[]` |
+| `search(query, maxResults?)` | Full-text search with BM25 | `SearchResult[]` |
+| `findSimilar(code, maxResults?)` | TF-IDF similarity search | `SimilarCode[]` |
+| `getFile(path)` | Get file content | `string \| null` |
+| `symbolAt(path, line)` | Get symbol at line | `Symbol \| null` |
+| `symbolsInFile(path)` | List symbols in file | `Symbol[]` |
+| `listFiles()` | List indexed file paths | `string[]` |
+| `stats()` | Get engine statistics | `Stats` |
+| `clear()` | Clear all indexed data | `void` |
+
+**TypeScript Types:**
+
+```typescript
+interface Symbol {
+  name: string;
+  kind: string;  // 'function' | 'class' | 'struct' | etc.
+  file_path: string;
+  start_line: number;
+  end_line: number;
+  signature?: string;
+  doc_comment?: string;
+}
+
+interface SearchResult {
+  file: string;
+  start_line: number;
+  end_line: number;
+  content: string;
+  score: number;
+}
+
+interface Stats {
+  files: number;
+  symbols: number;
+  embeddings: number;
+}
+```
+
+**Supported Symbol Kinds:** `function`, `method`, `class`, `struct`, `enum`, `interface`, `trait`, `type`, `module`, `namespace`, `constant`, `variable`
+
+**Bundle Size:** ~2-3MB gzipped (includes tree-sitter parsers for all languages)
+
+## Available Tools (74)
+
+### Repository & File Management
+
+| Tool | Description |
+|------|-------------|
+| `list_repos` | List all indexed repositories with metadata |
+| `get_project_structure` | Get directory tree with file icons and sizes |
+| `get_file` | Get file contents with optional line range |
+| `get_excerpt` | Extract code around specific lines with context |
+| `reindex` | Trigger re-indexing of repositories |
+| `discover_repos` | Auto-discover repositories in a directory |
+| `validate_repo` | Check if path is a valid repository |
+| `get_index_status` | Show index stats and enabled features |
+
+### Symbol Search & Navigation
+
+| Tool | Description |
+|------|-------------|
+| `find_symbols` | Find structs, classes, functions by type/pattern |
+| `get_symbol_definition` | Get symbol source with surrounding context |
+| `find_references` | Find all references to a symbol |
+| `get_dependencies` | Analyze imports and dependents |
+| `workspace_symbol_search` | Fuzzy search symbols across workspace |
+| `find_symbol_usages` | Cross-file symbol usage with imports |
+| `get_export_map` | Get exported symbols from a file/module |
+
+### Code Search
+
+| Tool | Description |
+|------|-------------|
+| `search_code` | Keyword search with relevance ranking |
+| `semantic_search` | BM25-ranked semantic search |
+| `hybrid_search` | Combined BM25 + TF-IDF with rank fusion |
+| `search_chunks` | Search over AST-aware code chunks |
+| `find_similar_code` | Find code similar to a snippet (TF-IDF) |
+| `find_similar_to_symbol` | Find code similar to a symbol |
+
+### AST-Aware Chunking
+
+| Tool | Description |
+|------|-------------|
+| `get_chunks` | Get AST-aware chunks for a file |
+| `get_chunk_stats` | Statistics about code chunks |
+| `get_embedding_stats` | Embedding index statistics |
+
+### Neural Semantic Search (requires `--neural`)
+
+| Tool | Description |
+|------|-------------|
+| `neural_search` | Semantic search using neural embeddings (finds similar code even with different names) |
+| `find_semantic_clones` | Find Type-3/4 semantic clones of a function |
+| `get_neural_stats` | Neural embedding index statistics |
+
+### Call Graph Analysis (requires `--call-graph`)
+
+| Tool | Description |
+|------|-------------|
+| `get_call_graph` | Get call graph for repository/function |
+| `get_callers` | Find functions that call a function |
+| `get_callees` | Find functions called by a function |
+| `find_call_path` | Find path between two functions |
+| `get_complexity` | Get cyclomatic/cognitive complexity |
+| `get_function_hotspots` | Find highly connected functions |
+
+### Control Flow Analysis
+
+| Tool | Description |
+|------|-------------|
+| `get_control_flow` | Get CFG showing basic blocks and branches |
+| `find_dead_code` | Find unreachable code blocks |
+
+### Data Flow Analysis
+
+| Tool | Description |
+|------|-------------|
+| `get_data_flow` | Variable definitions and uses |
+| `get_reaching_definitions` | Which assignments reach each point |
+| `find_uninitialized` | Variables used before initialization |
+| `find_dead_stores` | Assignments that are never read |
+
+### Type Inference (Python/JavaScript/TypeScript)
+
+| Tool | Description |
+|------|-------------|
+| `infer_types` | Infer types for variables in a function without external type checkers |
+| `check_type_errors` | Find potential type errors without running mypy/tsc |
+| `get_typed_taint_flow` | Enhanced taint analysis combining data flow with type inference |
+
+### Import/Dependency Graph
+
+| Tool | Description |
+|------|-------------|
+| `get_import_graph` | Build and analyze import graph |
+| `find_circular_imports` | Detect circular dependencies |
+| `get_incremental_status` | Merkle tree and change statistics |
+
+### Security Analysis - Taint Tracking
+
+| Tool | Description |
+|------|-------------|
+| `find_injection_vulnerabilities` | Find SQL injection, XSS, command injection, path traversal |
+| `trace_taint` | Trace tainted data flow from a source |
+| `get_taint_sources` | List taint sources (user input, files, network) |
+| `get_security_summary` | Comprehensive security risk assessment |
+
+### Security Analysis - Rules Engine
+
+| Tool | Description |
+|------|-------------|
+| `scan_security` | Scan with security rules (OWASP, CWE, crypto, secrets) |
+| `check_owasp_top10` | Scan for OWASP Top 10 2021 vulnerabilities |
+| `check_cwe_top25` | Scan for CWE Top 25 weaknesses |
+| `explain_vulnerability` | Get detailed vulnerability explanation |
+| `suggest_fix` | Get remediation suggestions for findings |
+
+### Supply Chain Security
+
+| Tool | Description |
+|------|-------------|
+| `generate_sbom` | Generate SBOM (CycloneDX/SPDX/JSON) |
+| `check_dependencies` | Check for known vulnerabilities (OSV database) |
+| `check_licenses` | Analyze licenses for compliance issues |
+| `find_upgrade_path` | Find safe upgrade paths for vulnerable deps |
+
+### Git Integration (requires `--git`)
+
+| Tool | Description |
+|------|-------------|
+| `get_blame` | Git blame for file |
+| `get_file_history` | Commit history for file |
+| `get_recent_changes` | Recent commits in repository |
+| `get_hotspots` | Files with high churn and complexity |
+| `get_contributors` | Repository/file contributors |
+| `get_commit_diff` | Diff for specific commit |
+| `get_symbol_history` | Commits that changed a symbol |
+| `get_branch_info` | Current branch and status |
+| `get_modified_files` | Working tree changes |
+
+### LSP Integration (requires `--lsp`)
+
+| Tool | Description |
+|------|-------------|
+| `get_hover_info` | Type info and documentation |
+| `get_type_info` | Precise type information |
+| `go_to_definition` | Find definition location |
+
+### Remote Repository Support (requires `--remote`)
+
+| Tool | Description |
+|------|-------------|
+| `add_remote_repo` | Clone and index GitHub repository |
+| `list_remote_files` | List files via GitHub API |
+| `get_remote_file` | Fetch file via GitHub API |
+
+### Metrics
+
+| Tool | Description |
+|------|-------------|
+| `get_metrics` | Performance stats and timing |
+
+## Security Rules
+
+narsil-mcp includes built-in security rules in `rules/`:
+
+- **`owasp-top10.yaml`** - OWASP Top 10 2021 vulnerability patterns
+- **`cwe-top25.yaml`** - CWE Top 25 Most Dangerous Weaknesses
+- **`crypto.yaml`** - Cryptographic issues (weak algorithms, hardcoded keys)
+- **`secrets.yaml`** - Secret detection (API keys, passwords, tokens)
+
+Custom rules can be loaded with `scan_security --ruleset /path/to/rules.yaml`.
+
+## Architecture
+
+```
++-----------------------------------------------------------------+
+|                         MCP Server                               |
+|  +-----------------------------------------------------------+  |
+|  |                   JSON-RPC over stdio                      |  |
+|  +-----------------------------------------------------------+  |
+|                              |                                   |
+|  +---------------------------v-------------------------------+  |
+|  |                   Code Intel Engine                        |  |
+|  |  +------------+ +------------+ +------------------------+  |  |
+|  |  |  Symbol    | |   File     | |    Search Engine       |  |  |
+|  |  |  Index     | |   Cache    | |  (Tantivy + TF-IDF)    |  |  |
+|  |  | (DashMap)  | | (DashMap)  | +------------------------+  |  |
+|  |  +------------+ +------------+                              |  |
+|  |  +------------+ +------------+ +------------------------+  |  |
+|  |  | Call Graph | |  Taint     | |   Security Rules       |  |  |
+|  |  |  Analysis  | |  Tracker   | |   Engine               |  |  |
+|  |  +------------+ +------------+ +------------------------+  |  |
+|  +-----------------------------------------------------------+  |
+|                              |                                   |
+|  +---------------------------v-------------------------------+  |
+|  |                Tree-sitter Parser                          |  |
+|  |  +------+ +------+ +------+ +------+ +------+             |  |
+|  |  | Rust | |Python| |  JS  | |  TS  | | Go   | ...         |  |
+|  |  +------+ +------+ +------+ +------+ +------+             |  |
+|  +-----------------------------------------------------------+  |
+|                              |                                   |
+|  +---------------------------v-------------------------------+  |
+|  |                Repository Walker                           |  |
+|  |           (ignore crate - respects .gitignore)             |  |
+|  +-----------------------------------------------------------+  |
++-----------------------------------------------------------------+
+```
+
+## Performance
+
+Benchmarked on Apple M1 (criterion.rs):
+
+### Parsing Throughput
+
+| Language | Input Size | Time | Throughput |
+|----------|------------|------|------------|
+| Rust (large file) | 278 KB | 131 µs | **1.98 GiB/s** |
+| Rust (medium file) | 27 KB | 13.5 µs | 1.89 GiB/s |
+| Python | ~4 KB | 16.7 µs | - |
+| TypeScript | ~5 KB | 13.9 µs | - |
+| Mixed (5 files) | ~15 KB | 57 µs | - |
+
+### Search Latency
+
+| Operation | Corpus Size | Time |
+|-----------|-------------|------|
+| Symbol exact match | 1,000 symbols | **483 ns** |
+| Symbol prefix match | 1,000 symbols | 2.7 µs |
+| Symbol fuzzy match | 1,000 symbols | 16.5 µs |
+| BM25 full-text | 1,000 docs | 80 µs |
+| TF-IDF similarity | 1,000 docs | 130 µs |
+| Hybrid (BM25+TF-IDF) | 1,000 docs | 151 µs |
+
+### End-to-End Indexing
+
+| Repository | Files | Symbols | Time | Memory |
+|------------|-------|---------|------|--------|
+| narsil-mcp (this repo) | 53 | 1,733 | 220 ms | ~50 MB |
+| rust-analyzer | 2,847 | ~50K | 2.1s | 89 MB |
+| linux kernel | 78,000+ | ~500K | 45s | 2.1 GB |
+
+**Key metrics:**
+- Tree-sitter parsing: **~2 GiB/s** sustained throughput
+- Symbol lookup: **<1µs** for exact match
+- Full-text search: **<1ms** for most queries
+- Hybrid search runs BM25 + TF-IDF in parallel via rayon
+
+## Development
+
+```bash
+# Run tests (255 tests)
+cargo test
+
+# Run benchmarks (criterion.rs)
+cargo bench
+
+# Run with debug logging
+RUST_LOG=debug cargo run -- --repos ./test-fixtures
+
+# Format code
+cargo fmt
+
+# Lint
+cargo clippy
+
+# Test with MCP Inspector
+npx @modelcontextprotocol/inspector ./target/release/narsil-mcp --repos ./path/to/repo
+```
+
+## Troubleshooting
+
+### Tree-sitter Build Errors
+
+If you see errors about missing C compilers or tree-sitter during build:
+
+```bash
+# macOS
+xcode-select --install
+
+# Ubuntu/Debian
+sudo apt install build-essential
+
+# For WASM builds
+brew install emscripten  # macOS
+```
+
+### Neural Search API Errors
+
+```bash
+# Check your API key is set
+echo $VOYAGE_API_KEY  # or $OPENAI_API_KEY
+
+# Common issue: wrong key format
+export VOYAGE_API_KEY="pa-..."  # Voyage keys start with "pa-"
+export OPENAI_API_KEY="sk-..."  # OpenAI keys start with "sk-"
+```
+
+### Index Not Finding Files
+
+```bash
+# Check .gitignore isn't excluding files
+narsil-mcp --repos /path --verbose  # Shows skipped files
+
+# Force reindex
+narsil-mcp --repos /path --reindex
+```
+
+### Memory Issues with Large Repos
+
+```bash
+# For very large repos (>50K files), increase stack size
+RUST_MIN_STACK=8388608 narsil-mcp --repos /path/to/huge-repo
+
+# Or index specific subdirectories
+narsil-mcp --repos /path/to/repo/src --repos /path/to/repo/lib
+```
+
+## Roadmap
+
+See [docs/IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md) for detailed implementation status.
+
+### Completed
+
+- [x] Multi-language symbol extraction (14 languages)
+- [x] Full-text search with Tantivy (BM25 ranking)
+- [x] Hybrid search (BM25 + TF-IDF with RRF)
+- [x] AST-aware code chunking
+- [x] Git blame/history integration
+- [x] Call graph analysis with complexity metrics
+- [x] Control flow graph (CFG) analysis
+- [x] Data flow analysis (DFG) with reaching definitions
+- [x] Dead code and dead store detection
+- [x] Taint analysis for injection vulnerabilities
+- [x] Security rules engine (OWASP, CWE, crypto, secrets)
+- [x] SBOM generation (CycloneDX, SPDX)
+- [x] Dependency vulnerability checking (OSV)
+- [x] License compliance analysis
+- [x] Import graph with circular dependency detection
+- [x] Cross-language symbol resolution
+- [x] Incremental indexing with Merkle trees
+- [x] Index persistence
+- [x] Watch mode for file changes
+- [x] LSP integration
+- [x] Remote repository support
+- [x] Streaming responses
+
+## What's New in 1.0
+
+This release marks production readiness with 255 tests, comprehensive benchmarks, and security hardening:
+
+- **Neural semantic search** - Find similar code using Voyage AI or OpenAI embeddings
+- **Type inference** - Infer types in Python/JavaScript/TypeScript without external tools
+- **Multi-language taint analysis** - Security scanning for PHP, Java, C#, Ruby, Kotlin
+- **Parallel hybrid search** - BM25 + TF-IDF run concurrently via rayon
+- **WASM build** - Run in browser for code playgrounds and educational tools
+- **4 new languages** - Bash, Ruby, Kotlin, PHP support
+- **115 bundled security rules** - OWASP, CWE, crypto, secrets detection
+- **Security hardening** - Path traversal prevention, secret redaction, file size limits
+- **IDE configs included** - Claude Desktop, Cursor, VS Code templates
+
+## License
+
+MIT
+
+## Credits
+
+Built with:
+- [tree-sitter](https://tree-sitter.github.io/) - Incremental parsing
+- [tantivy](https://github.com/quickwit-oss/tantivy) - Full-text search
+- [tokio](https://tokio.rs/) - Async runtime
+- [rayon](https://github.com/rayon-rs/rayon) - Data parallelism
+- [serde](https://serde.rs/) - Serialization

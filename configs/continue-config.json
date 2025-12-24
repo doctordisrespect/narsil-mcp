@@ -1,0 +1,13 @@
+{
+  "mcpServers": [
+    {
+      "name": "narsil-mcp",
+      "command": "narsil-mcp",
+      "args": [
+        "--repos", "${workspaceFolder}",
+        "--git",
+        "--call-graph"
+      ]
+    }
+  ]
+}
