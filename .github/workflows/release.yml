@@ -117,15 +117,30 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
+
+          # Get version from tag (remove 'v' prefix)
+          VERSION=${GITHUB_REF#refs/tags/v}
+
           for dir in artifacts/*/; do
             artifact_name=$(basename "$dir")
+
             if [[ "$artifact_name" == *"windows"* ]]; then
-              cp "$dir/narsil-mcp.exe" "release-assets/${artifact_name}.exe"
+              # Windows: Create .zip
+              cd "$dir"
+              zip "../release-assets/narsil-mcp-v${VERSION}-${artifact_name#narsil-mcp-}.zip" narsil-mcp.exe
+              cd -
+              # Generate SHA256
+              (cd release-assets && shasum -a 256 "narsil-mcp-v${VERSION}-${artifact_name#narsil-mcp-}.zip" > "narsil-mcp-v${VERSION}-${artifact_name#narsil-mcp-}.zip.sha256")
             else
-              cp "$dir/narsil-mcp" "release-assets/${artifact_name}"
-              chmod +x "release-assets/${artifact_name}"
+              # Unix: Create .tar.gz
+              cd "$dir"
+              tar -czf "../release-assets/narsil-mcp-v${VERSION}-${artifact_name#narsil-mcp-}.tar.gz" narsil-mcp
+              cd -
+              # Generate SHA256
+              (cd release-assets && shasum -a 256 "narsil-mcp-v${VERSION}-${artifact_name#narsil-mcp-}.tar.gz" > "narsil-mcp-v${VERSION}-${artifact_name#narsil-mcp-}.tar.gz.sha256")
             fi
           done
+
           ls -la release-assets/
 
       - name: Create GitHub Release

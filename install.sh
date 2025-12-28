@@ -89,18 +89,21 @@ install_binary() {
     echo -e "${BLUE}Downloading narsil-mcp ${version} for ${platform}...${NC}"
 
     if [ "$IS_WINDOWS" = true ]; then
-        # Windows: download .exe directly
-        local artifact_name="narsil-mcp-windows-x86_64.exe"
+        # Windows: download .zip
+        local artifact_name="narsil-mcp-${version}-windows-x86_64.zip"
         local download_url="https://github.com/${REPO}/releases/download/${version}/${artifact_name}"
 
-        if ! curl -fsSL "$download_url" -o "$tmpdir/${BINARY_NAME}" 2>/dev/null; then
+        if ! curl -fsSL "$download_url" -o "$tmpdir/${artifact_name}" 2>/dev/null; then
             echo -e "${YELLOW}Pre-built binary not available. Building from source...${NC}"
             install_from_source
             return
         fi
+
+        echo -e "${BLUE}Extracting...${NC}"
+        unzip -q "$tmpdir/${artifact_name}" -d "$tmpdir"
     else
         # Unix: download and extract tar.gz
-        local download_url="https://github.com/${REPO}/releases/download/${version}/narsil-mcp-${platform}.tar.gz"
+        local download_url="https://github.com/${REPO}/releases/download/${version}/narsil-mcp-${version}-${platform}.tar.gz"
 
         if ! curl -fsSL "$download_url" -o "$tmpdir/narsil-mcp.tar.gz" 2>/dev/null; then
             echo -e "${YELLOW}Pre-built binary not available. Building from source...${NC}"
