@@ -92,6 +92,15 @@ yay -S narsil-mcp      # Build from source
 cargo install narsil-mcp
 ```
 
+**Node.js/npm (all platforms):**
+```bash
+npm install -g narsil-mcp
+# or
+yarn global add narsil-mcp
+# or
+pnpm add -g narsil-mcp
+```
+
 ### One-Click Install Script
 
 **macOS / Linux:**

@@ -17,6 +17,13 @@ brew install narsil-mcp
 cargo install narsil-mcp
 ```
 
+**npm** (requires Node.js):
+```bash
+npm install -g narsil-mcp
+# or
+yarn global add narsil-mcp
+```
+
 **Install script** (curl):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/postrv/narsil-mcp/main/install.sh | bash
@@ -33,6 +40,11 @@ scoop install narsil-mcp
 **Cargo** (requires Rust):
 ```bash
 cargo install narsil-mcp
+```
+
+**npm** (requires Node.js):
+```bash
+npm install -g narsil-mcp
 ```
 
 ### Arch Linux
@@ -137,6 +149,14 @@ If install script fails on Windows:
 2. Or use Scoop instead: `scoop install narsil-mcp`
 3. Or build from source with cargo
 
+### npm Installation Issues
+
+If `npm install -g` fails:
+1. Check Node.js version: `node --version` (requires 14+)
+2. Try with sudo on macOS/Linux: `sudo npm install -g narsil-mcp`
+3. Or install without global: `npm install narsil-mcp` (then use `npx narsil-mcp`)
+4. Check platform support: macOS (Intel/ARM), Linux (x64), Windows (x64)
+
 ## Updating
 
 ### Homebrew
@@ -161,6 +181,11 @@ yay -Syu narsil-mcp-bin
 cargo install narsil-mcp --force
 ```
 
+### npm
+```bash
+npm update -g narsil-mcp
+```
+
 ## Uninstalling
 
 ### Homebrew
@@ -183,4 +208,9 @@ yay -R narsil-mcp-bin
 ### Cargo
 ```bash
 cargo uninstall narsil-mcp
+```
+
+### npm
+```bash
+npm uninstall -g narsil-mcp
 ```
