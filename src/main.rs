@@ -44,7 +44,7 @@ use tracing_subscriber::FmtSubscriber;
 
 #[derive(ClapParser, Debug)]
 #[command(name = "narsil-mcp")]
-#[command(version = "1.1.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Blazingly fast MCP server for code intelligence")]
 struct Args {
     #[command(subcommand)]
