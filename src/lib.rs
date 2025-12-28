@@ -5,6 +5,7 @@
 pub mod callgraph;
 pub mod cfg;
 pub mod chunking;
+pub mod config;
 pub mod dfg;
 pub mod embeddings;
 pub mod extract;
@@ -19,6 +20,7 @@ pub mod security_rules;
 pub mod supply_chain;
 pub mod symbols;
 pub mod taint;
+pub mod tool_metadata;
 pub mod type_inference;
 
 // Native-only modules (require tokio, octocrab, lsp, etc.)

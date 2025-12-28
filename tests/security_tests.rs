@@ -24,6 +24,9 @@ async fn test_read_resource_path_traversal_protection() {
         .await
         .unwrap();
 
+    // Complete initialization to index the repository
+    engine.complete_initialization().await.unwrap();
+
     // Test 1: Reading a file inside the repository should succeed
     let safe_uri = format!("file://{}", safe_file.to_str().unwrap());
     let result = engine.read_resource(&safe_uri).await;
@@ -80,6 +83,9 @@ async fn test_read_resource_nonexistent_path() {
         .await
         .unwrap();
 
+    // Complete initialization to index the repository
+    engine.complete_initialization().await.unwrap();
+
     // Attempt to read a non-existent file
     let nonexistent = repo_path.join("nonexistent.txt");
     let uri = format!("file://{}", nonexistent.to_str().unwrap());
@@ -108,6 +114,9 @@ async fn test_read_resource_relative_uri() {
     let engine = CodeIntelEngine::new(index_path, vec![repo_path.clone()])
         .await
         .unwrap();
+
+    // Complete initialization to index the repository
+    engine.complete_initialization().await.unwrap();
 
     // Test with URI without file:// prefix
     let result = engine.read_resource(test_file.to_str().unwrap()).await;

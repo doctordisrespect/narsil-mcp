@@ -116,6 +116,9 @@ async fn test_persistence_index_loading() -> Result<()> {
         )
         .await?;
 
+        // Complete initialization to index the repository
+        engine.complete_initialization().await?;
+
         let symbols = engine
             .find_symbols(
                 repo.path().file_name().unwrap().to_str().unwrap(),
@@ -139,6 +142,9 @@ async fn test_persistence_index_loading() -> Result<()> {
             options,
         )
         .await?;
+
+        // Complete initialization (should load from cache)
+        engine2.complete_initialization().await?;
 
         // Verify symbols are available (loaded from cache)
         let symbols = engine2
@@ -185,12 +191,15 @@ async fn test_persistence_stale_file_detection() -> Result<()> {
 
     // First indexing
     {
-        let _engine = CodeIntelEngine::with_options(
+        let engine = CodeIntelEngine::with_options(
             index_dir.path().to_path_buf(),
             vec![repo.path().to_path_buf()],
             options.clone(),
         )
         .await?;
+
+        // Complete initialization to index and persist
+        engine.complete_initialization().await?;
     }
 
     // Wait a bit
@@ -217,6 +226,9 @@ async fn test_persistence_stale_file_detection() -> Result<()> {
             options,
         )
         .await?;
+
+        // Complete initialization (should detect stale file and re-index)
+        engine2.complete_initialization().await?;
 
         // Verify the new struct is present
         let symbols = engine2
@@ -265,6 +277,9 @@ async fn test_persistence_disabled() -> Result<()> {
     )
     .await?;
 
+    // Complete initialization to index the repository
+    engine.complete_initialization().await?;
+
     // Verify it still works, just doesn't persist
     let symbols = engine
         .find_symbols(
@@ -300,12 +315,15 @@ async fn test_empty_persisted_index() -> Result<()> {
 
     // First time - empty repo
     {
-        let _engine = CodeIntelEngine::with_options(
+        let engine = CodeIntelEngine::with_options(
             index_dir.path().to_path_buf(),
             vec![repo.path().to_path_buf()],
             options.clone(),
         )
         .await?;
+
+        // Complete initialization (should create empty index)
+        engine.complete_initialization().await?;
     }
 
     // Add a file
@@ -324,6 +342,9 @@ async fn test_empty_persisted_index() -> Result<()> {
             options,
         )
         .await?;
+
+        // Complete initialization (should re-index with new file)
+        engine2.complete_initialization().await?;
 
         let symbols = engine2
             .find_symbols(

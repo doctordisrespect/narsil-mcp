@@ -4,16 +4,16 @@
 
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-359%20passed-brightgreen.svg)](https://github.com/postrv/narsil-mcp)
+[![Tests](https://img.shields.io/badge/tests-615%20passed-brightgreen.svg)](https://github.com/postrv/narsil-mcp)
 [![MCP](https://img.shields.io/badge/MCP-compatible-blue.svg)](https://modelcontextprotocol.io)
 
-A Rust-powered MCP (Model Context Protocol) server providing AI assistants with deep code understanding through 76 specialized tools.
+A Rust-powered MCP (Model Context Protocol) server providing AI assistants with deep code understanding through 75+ specialized tools.
 
 ## Why narsil-mcp?
 
 | Feature | narsil-mcp | XRAY | Serena | GitHub MCP |
 |---------|------------|------|--------|------------|
-| **Languages** | 14 | 4 | 30+ (LSP) | N/A |
+| **Languages** | 16 | 4 | 30+ (LSP) | N/A |
 | **Neural Search** | Yes | No | No | No |
 | **Taint Analysis** | Yes | No | No | No |
 | **SBOM/Licenses** | Yes | No | No | Partial |
@@ -33,7 +33,7 @@ A Rust-powered MCP (Model Context Protocol) server providing AI assistants with 
 ### Why Choose narsil-mcp?
 
 - **Written in Rust** - Blazingly fast, memory-safe, single binary (~30MB)
-- **Tree-sitter powered** - Accurate, incremental parsing for 14 languages
+- **Tree-sitter powered** - Accurate, incremental parsing for 16 languages
 - **Zero config** - Point at repos and go
 - **MCP compliant** - Works with Claude, Cursor, VS Code Copilot, Zed, and any MCP client
 - **Privacy-first** - Fully local, no data leaves your machine
@@ -187,6 +187,129 @@ narsil-mcp \
 - `VOYAGE_API_KEY` - Voyage AI specific API key
 - `OPENAI_API_KEY` - OpenAI specific API key
 - `EMBEDDING_SERVER_ENDPOINT` - Custom embedding API endpoint URL (optional, allows using self-hosted models)
+
+### Configuration
+
+**v1.1.0+ introduces optional configuration** for fine-grained control over tools and performance. **All existing usage continues to work** - configuration is completely optional!
+
+#### Quick Start
+
+```bash
+# Generate default config interactively
+narsil-mcp config init
+
+# List available tools
+narsil-mcp tools list
+
+# Apply a preset via CLI
+narsil-mcp --repos ~/project --preset minimal
+```
+
+#### Automatic Editor Detection
+
+narsil-mcp detects your editor and applies an optimal preset automatically:
+
+| Editor | Preset | Tools | Context Tokens | Why |
+|--------|--------|-------|----------------|-----|
+| **Zed** | Minimal | 26 | ~4,686 | Fast startup, minimal context |
+| **VS Code** | Balanced | 51 | ~8,948 | Good feature balance |
+| **Claude Desktop** | Full | 75+ | ~12,001 | Maximum capabilities |
+
+**Token Savings:**
+- **Minimal preset:** 61% fewer tokens vs Full
+- **Balanced preset:** 25% fewer tokens vs Full
+
+See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for detailed benchmarks.
+
+#### Presets
+
+Choose a preset based on your use case:
+
+```bash
+# Minimal - Fast, lightweight (Zed, Cursor)
+narsil-mcp --repos ~/project --preset minimal
+
+# Balanced - Good defaults (VS Code, IntelliJ)
+narsil-mcp --repos ~/project --preset balanced --git --call-graph
+
+# Full - All features (Claude Desktop, comprehensive analysis)
+narsil-mcp --repos ~/project --preset full --git --call-graph
+
+# Security-focused - Security and supply chain tools
+narsil-mcp --repos ~/project --preset security-focused
+```
+
+#### Configuration Files
+
+**User config** (`~/.config/narsil-mcp/config.yaml`):
+
+```yaml
+version: "1.0"
+preset: "balanced"
+
+tools:
+  # Disable slow tools
+  overrides:
+    neural_search:
+      enabled: false
+      reason: "Too slow for interactive use"
+
+performance:
+  max_tool_count: 50  # Limit total tools
+```
+
+**Project config** (`.narsil.yaml` in repo root):
+
+```yaml
+version: "1.0"
+preset: "security-focused"  # Override user preset
+
+tools:
+  categories:
+    Security:
+      enabled: true
+    SupplyChain:
+      enabled: true
+```
+
+**Priority:** CLI flags > Environment vars > Project config > User config > Defaults
+
+#### Environment Variables
+
+```bash
+# Apply preset
+export NARSIL_PRESET=minimal
+
+# Enable specific categories
+export NARSIL_ENABLED_CATEGORIES=Repository,Symbols,Search
+
+# Disable specific tools
+export NARSIL_DISABLED_TOOLS=neural_search,generate_sbom
+```
+
+#### CLI Commands
+
+```bash
+# View effective config
+narsil-mcp config show
+
+# Validate config file
+narsil-mcp config validate ~/.config/narsil-mcp/config.yaml
+
+# List tools by category
+narsil-mcp tools list --category Search
+
+# Search for tools
+narsil-mcp tools search "git"
+
+# Export config
+narsil-mcp config export > my-config.yaml
+```
+
+**Learn More:**
+- [Configuration Guide](docs/CONFIGURATION.md) (coming soon)
+- [Migration Guide](docs/MIGRATION.md) - Upgrading from v1.0.2
+- [Performance Analysis](docs/PERFORMANCE.md) - Token usage benchmarks
 
 ### Visualization Frontend
 

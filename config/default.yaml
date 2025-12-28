@@ -1,0 +1,113 @@
+# Default configuration for narsil-mcp
+#
+# This configuration enables all tool categories by default.
+# Individual tools can be disabled using the 'overrides' section.
+#
+# To customize, copy this file to:
+# - ~/.config/narsil-mcp/config.yaml (user config)
+# - .narsil.yaml (project config)
+
+version: "1.0"
+
+# Tool configuration
+tools:
+  # Category-level configuration
+  categories:
+    # Repository and file operations (10 tools)
+    Repository:
+      enabled: true
+      description: "Repository and file operations"
+
+    # Symbol search and navigation (7 tools)
+    Symbols:
+      enabled: true
+      description: "Symbol search and navigation"
+
+    # Code search capabilities (12 tools)
+    Search:
+      enabled: true
+      description: "Code search capabilities"
+
+    # Call graph analysis (6 tools, requires --call-graph)
+    CallGraph:
+      enabled: true
+      description: "Call graph analysis"
+      required_flags: ["call_graph"]
+
+    # Git integration (9 tools, requires --git)
+    Git:
+      enabled: true
+      description: "Git integration"
+      required_flags: ["git"]
+
+    # LSP integration (3 tools, enhanced with --lsp)
+    LSP:
+      enabled: true
+      description: "LSP integration"
+
+    # Remote repository support (3 tools, requires --remote)
+    Remote:
+      enabled: true
+      description: "Remote repository support"
+      required_flags: ["remote"]
+
+    # Security vulnerability scanning (9 tools)
+    Security:
+      enabled: true
+      description: "Security vulnerability scanning"
+
+    # Supply chain analysis (4 tools)
+    SupplyChain:
+      enabled: true
+      description: "Supply chain analysis"
+
+    # Code analysis tools (11 tools)
+    Analysis:
+      enabled: true
+      description: "Code analysis tools"
+
+    # Graph visualization (1 tool)
+    Graph:
+      enabled: true
+      description: "Graph visualization"
+
+  # Individual tool overrides
+  # Use this section to disable specific tools or override their settings
+  overrides: {}
+    # Example: Disable neural search
+    # neural_search:
+    #   enabled: false
+    #   reason: "Too slow for interactive use"
+    #   performance_impact: "high"
+    #   requires_api_key: true
+    #
+    # Example: Disable SBOM generation
+    # generate_sbom:
+    #   enabled: false
+    #   reason: "Not needed for this project"
+
+# Performance budgets and limits
+performance:
+  # Maximum number of tools to expose
+  max_tool_count: 76
+
+  # Maximum acceptable startup latency in milliseconds
+  startup_latency_ms: 10
+
+  # Maximum acceptable filtering latency in milliseconds
+  filtering_latency_ms: 1
+
+# Editor-specific configurations (optional)
+editors: {}
+  # Example: VS Code configuration
+  # vscode:
+  #   preset: "balanced"
+  #   max_tools: 50
+  #
+  # Example: Zed configuration
+  # zed:
+  #   preset: "minimal"
+  #   max_tools: 30
+
+# Feature requirements (optional)
+feature_requirements: {}

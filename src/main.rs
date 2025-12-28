@@ -7,6 +7,7 @@
 mod callgraph;
 mod cfg;
 mod chunking;
+mod config;
 mod dfg;
 mod embeddings;
 mod extract;
@@ -31,10 +32,11 @@ mod supply_chain;
 mod symbols;
 mod taint;
 mod tool_handlers;
+mod tool_metadata;
 mod type_inference;
 
 use anyhow::Result;
-use clap::Parser as ClapParser;
+use clap::{Parser as ClapParser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{info, warn, Level};
@@ -45,6 +47,26 @@ use tracing_subscriber::FmtSubscriber;
 #[command(version = "1.0.0")]
 #[command(about = "Blazingly fast MCP server for code intelligence")]
 struct Args {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    #[command(flatten)]
+    server: ServerArgs,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Configuration management commands
+    #[command(subcommand)]
+    Config(config::ConfigCommand),
+
+    /// Tool listing and information commands
+    #[command(subcommand)]
+    Tools(config::ToolsCommand),
+}
+
+#[derive(ClapParser, Debug)]
+struct ServerArgs {
     /// Paths to repositories or directories to index
     #[arg(short, long)]
     repos: Vec<PathBuf>,
@@ -118,8 +140,20 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Handle subcommands (config, tools)
+    if let Some(command) = args.command {
+        // For subcommands, we don't need logging to stderr
+        return match command {
+            Commands::Config(config_cmd) => config::handle_config_command(config_cmd),
+            Commands::Tools(tools_cmd) => config::handle_tools_command(tools_cmd),
+        };
+    }
+
+    // Default: run MCP server
+    let server_args = args.server;
+
     // Initialize logging to stderr (stdout is for MCP protocol)
-    let level = if args.verbose {
+    let level = if server_args.verbose {
         Level::DEBUG
     } else {
         Level::INFO
@@ -133,8 +167,8 @@ async fn main() -> Result<()> {
     info!("Starting narsil-mcp v1.0.0");
 
     // Handle repository discovery if requested
-    let mut repos = args.repos;
-    if let Some(discover_path) = args.discover {
+    let mut repos = server_args.repos;
+    if let Some(discover_path) = server_args.discover {
         info!("Discovering repositories in: {:?}", discover_path);
         let discovered = repo::discover_repos(&discover_path, 3)?;
         info!("Found {} repositories", discovered.len());
@@ -144,12 +178,12 @@ async fn main() -> Result<()> {
     info!("Repos to index: {:?}", repos);
     info!(
         "Features: call_graph={}, git={}, watch={}, persist={}, lsp={}, streaming={}, remote={}, neural={}",
-        args.call_graph, args.git, args.watch, args.persist, args.lsp, args.streaming, args.remote, args.neural
+        server_args.call_graph, server_args.git, server_args.watch, server_args.persist, server_args.lsp, server_args.streaming, server_args.remote, server_args.neural
     );
 
     // Build LSP config
     let mut lsp_config = lsp::LspConfig::default();
-    if args.lsp {
+    if server_args.lsp {
         lsp_config.enabled = true;
         // Enable LSP for common languages
         for lang in [
@@ -172,10 +206,10 @@ async fn main() -> Result<()> {
 
     // Build streaming config
     let streaming_config = streaming::StreamingConfig {
-        enabled: args.streaming,
+        enabled: server_args.streaming,
         ..Default::default()
     };
-    if args.streaming {
+    if server_args.streaming {
         info!(
             "Streaming responses enabled (threshold: {} items)",
             streaming_config.auto_stream_threshold
@@ -184,24 +218,24 @@ async fn main() -> Result<()> {
 
     // Build neural config
     let neural_config = neural::NeuralConfig {
-        enabled: args.neural,
-        backend: args.neural_backend.clone(),
-        model_name: args.neural_model.clone(),
+        enabled: server_args.neural,
+        backend: server_args.neural_backend.clone(),
+        model_name: server_args.neural_model.clone(),
         ..Default::default()
     };
-    if args.neural {
+    if server_args.neural {
         info!(
             "Neural embeddings requested (backend={}, model={:?})",
-            args.neural_backend, args.neural_model
+            server_args.neural_backend, server_args.neural_model
         );
     }
 
     // Initialize the code intelligence engine with options
     let options = index::EngineOptions {
-        git_enabled: args.git,
-        call_graph_enabled: args.call_graph,
-        persist_enabled: args.persist,
-        watch_enabled: args.watch,
+        git_enabled: server_args.git,
+        call_graph_enabled: server_args.call_graph,
+        persist_enabled: server_args.persist,
+        watch_enabled: server_args.watch,
         streaming_config,
         lsp_config,
         neural_config,
@@ -209,10 +243,11 @@ async fn main() -> Result<()> {
 
     // NOTE: Engine creation is now fast and returns immediately.
     // Indexing happens in background to allow quick MCP server startup.
-    let mut engine = index::CodeIntelEngine::with_options(args.index_path, repos, options).await?;
+    let mut engine =
+        index::CodeIntelEngine::with_options(server_args.index_path, repos, options).await?;
 
     // Initialize remote repository support if enabled
-    if args.remote {
+    if server_args.remote {
         match engine.init_remote_manager() {
             Ok(()) => info!("Remote repository support enabled"),
             Err(e) => warn!("Failed to initialize remote repository support: {}", e),
@@ -223,7 +258,7 @@ async fn main() -> Result<()> {
 
     // Start background initialization task (indexing repos, git init)
     let init_engine = Arc::clone(&engine);
-    let reindex_flag = args.reindex;
+    let reindex_flag = server_args.reindex;
     tokio::spawn(async move {
         if reindex_flag {
             info!("Re-indexing all repositories...");
@@ -239,7 +274,7 @@ async fn main() -> Result<()> {
     });
 
     // Start watch mode in background if enabled
-    if args.watch {
+    if server_args.watch {
         let watch_engine = Arc::clone(&engine);
 
         // Create a shutdown signal channel for graceful shutdown
@@ -254,9 +289,9 @@ async fn main() -> Result<()> {
     }
 
     // Start HTTP server if enabled
-    if args.http {
-        info!("Starting HTTP server on port {}", args.http_port);
-        let http_server = http_server::HttpServer::new(Arc::clone(&engine), args.http_port);
+    if server_args.http {
+        info!("Starting HTTP server on port {}", server_args.http_port);
+        let http_server = http_server::HttpServer::new(Arc::clone(&engine), server_args.http_port);
         http_server.run().await?;
     } else {
         // Start the MCP server on stdio

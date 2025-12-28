@@ -682,6 +682,11 @@ impl CodeIntelEngine {
         &self.options.streaming_config
     }
 
+    /// Get a reference to the engine options
+    pub fn options(&self) -> &EngineOptions {
+        &self.options
+    }
+
     /// Helper to create a helpful error message for missing/invalid repo parameter
     fn repo_not_found_error(&self, repo: &str) -> anyhow::Error {
         if repo.is_empty() {

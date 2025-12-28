@@ -1255,7 +1255,8 @@ fn test_concurrent_requests() -> Result<()> {
     )?;
 
     let server = TestMcpServer::start_with_repo(repo.path())?;
-    std::thread::sleep(std::time::Duration::from_secs(2));
+    // Wait longer for deferred initialization to complete
+    std::thread::sleep(std::time::Duration::from_secs(3));
 
     let repo_name = repo.path().file_name().unwrap().to_str().unwrap();
 
