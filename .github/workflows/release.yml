@@ -145,7 +145,8 @@ jobs:
           cache-on-failure: true
 
       - name: Publish to crates.io
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        # --allow-dirty because Cargo.lock is auto-updated by cargo build and may differ slightly
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty
 
   # Build release binaries for all platforms
   build-binaries:
