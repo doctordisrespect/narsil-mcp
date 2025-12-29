@@ -1,0 +1,175 @@
+# Getting Started with narsil-mcp
+
+Get code intelligence working in 5 minutes.
+
+## 1. Install
+
+Choose one:
+
+```bash
+# Homebrew (macOS/Linux)
+brew install postrv/narsil/narsil-mcp
+
+# npm (all platforms)
+npm install -g narsil-mcp
+
+# Cargo (Rust users)
+cargo install narsil-mcp
+
+# Or download binary from GitHub releases
+```
+
+Verify installation:
+```bash
+narsil-mcp --version
+# narsil-mcp 1.1.4
+```
+
+## 2. Configure Your AI Tool
+
+### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "narsil-mcp": {
+      "command": "narsil-mcp",
+      "args": ["--repos", "/path/to/your/project", "--git", "--call-graph"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop.
+
+### Claude Code (CLI)
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "narsil-mcp": {
+      "command": "narsil-mcp",
+      "args": ["--repos", ".", "--git", "--call-graph"]
+    }
+  }
+}
+```
+
+### VS Code with Copilot
+
+Create `.vscode/mcp.json` in your workspace:
+
+```json
+{
+  "servers": {
+    "narsil-mcp": {
+      "command": "narsil-mcp",
+      "args": ["--repos", "${workspaceFolder}", "--git", "--call-graph"]
+    }
+  }
+}
+```
+
+### Cursor
+
+Create `.cursor/mcp.json` in your project:
+
+```json
+{
+  "mcpServers": {
+    "narsil-mcp": {
+      "command": "narsil-mcp",
+      "args": ["--repos", ".", "--git", "--call-graph"]
+    }
+  }
+}
+```
+
+## 3. Verify It's Working
+
+Ask your AI assistant:
+
+> "List the repositories that narsil-mcp has indexed"
+
+You should see your project listed. If not, check:
+- The path in `--repos` is correct
+- The server is running (check logs)
+- You restarted the AI tool after config changes
+
+## 4. Try Your First Queries
+
+Now ask questions about your code:
+
+```
+"What's the structure of this project?"
+→ Claude calls get_project_structure
+
+"Find all functions related to authentication"
+→ Claude calls find_symbols and search_code
+
+"What calls the handleLogin function?"
+→ Claude calls get_callers
+
+"Show me the git history for config.py"
+→ Claude calls get_file_history
+
+"Are there any security vulnerabilities?"
+→ Claude calls scan_security
+```
+
+## Command-Line Flags
+
+Enable features with flags:
+
+| Flag | What it enables |
+|------|-----------------|
+| `--git` | Git blame, history, contributors, hotspots |
+| `--call-graph` | Call graph analysis, callers/callees, complexity |
+| `--persist` | Save index to disk for faster startup |
+| `--watch` | Auto-reindex when files change |
+| `--neural` | Neural embeddings for semantic search (requires API key) |
+| `--lsp` | LSP integration for precise type info |
+
+Recommended starter config:
+```bash
+narsil-mcp --repos /path/to/project --git --call-graph --persist
+```
+
+## Troubleshooting
+
+### "Server not found" or connection errors
+
+1. Verify the binary is in your PATH:
+   ```bash
+   which narsil-mcp
+   ```
+
+2. Check the config path is correct for your platform
+
+3. Look for server logs (enable with `--verbose`)
+
+### "Repository not indexed"
+
+1. Verify the path exists and contains code
+2. Check file permissions
+3. Try explicit indexing:
+   ```bash
+   narsil-mcp --repos /path/to/project --reindex
+   ```
+
+### Tool calls failing
+
+Enable debug logging:
+```bash
+RUST_LOG=debug narsil-mcp --repos /path/to/project
+```
+
+## Next Steps
+
+- [Understand a Codebase](workflows/understand-codebase.md) - Explore an unfamiliar project
+- [Fix a Bug](workflows/fix-a-bug.md) - Debug with call graphs and taint analysis
+- [Security Audit](workflows/security-audit.md) - Find vulnerabilities

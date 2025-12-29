@@ -560,6 +560,20 @@ function calc(x) {
 
 > **Note for Zed**: narsil-mcp now starts immediately and indexes in the background, preventing initialization timeouts.
 
+### Playbooks & Tutorials
+
+See **[docs/playbooks](docs/playbooks/)** for practical usage guides:
+
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](docs/playbooks/getting-started.md) | Quick setup and first tool calls |
+| [Understand a Codebase](docs/playbooks/workflows/understand-codebase.md) | Explore unfamiliar projects |
+| [Fix a Bug](docs/playbooks/workflows/fix-a-bug.md) | Debug with call graphs and taint analysis |
+| [Security Audit](docs/playbooks/workflows/security-audit.md) | Find vulnerabilities with OWASP/CWE scanning |
+| [Code Review](docs/playbooks/workflows/code-review.md) | Review changes effectively |
+
+Each playbook shows the exact tool chains Claude uses to answer your questions.
+
 ### WebAssembly (Browser) Usage (Phase 9)
 
 narsil-mcp can run entirely in the browser via WebAssembly. This provides symbol extraction, search, and similarity analysis without a backend server - perfect for browser-based IDEs, code review tools, or educational platforms.
