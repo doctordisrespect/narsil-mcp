@@ -69,3 +69,4 @@ SECURITY_PATCH.md
 npm/bin/
 npm/node_modules/
 npm/*.tgz
+result
